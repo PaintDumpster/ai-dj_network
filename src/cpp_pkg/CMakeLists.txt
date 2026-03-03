@@ -11,18 +11,31 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 
 # reader node
-add_executable(reader src/reader.cpp)
+add_executable(reader src/reader.cpp src/serial_port.cpp)
+target_include_directories(reader PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 target_link_libraries(reader PUBLIC
-rclcpp::rclcpp
+  rclcpp::rclcpp
+  ${std_msgs_TARGETS}
 )
 
 # writer node
 add_executable(writer src/writer.cpp)
 target_link_libraries(writer PUBLIC rclcpp::rclcpp)
 
+# build_waveform node
+add_executable(build_waveform src/build_waveform.cpp)
+target_link_libraries(build_waveform PUBLIC
+  rclcpp::rclcpp
+  ${std_msgs_TARGETS}
+)
+
 install(TARGETS
   reader
   writer
+  build_waveform
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

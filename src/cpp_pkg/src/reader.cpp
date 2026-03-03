@@ -1,4 +1,3 @@
-#include <iostream>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include "cpp_pkg/serial_port.hpp"
@@ -11,12 +10,12 @@ public:
         this->declare_parameter("port", "/dev/ttyUSB0");
         this->declare_parameter("baud_rate", 9600);
 
-        std::string port_name = this->get_parameter("port_name").as_string();
-        int baudrate = this->get_parameter("baudrate").as_int();
+        std::string port_name = this->get_parameter("port").as_string();
+        int baud_rate = this->get_parameter("baud_rate").as_int();
 
         try {
-            serial_ = std::make_unique<SerialPort>(port_name, baudrate);
-            RCLCPP_INFO(this->get_logger(), "Serial port opened: %s at %d baud", port.c_str(), baudrate);
+            serial_ = std::make_unique<SerialPort>(port_name, baud_rate);
+            RCLCPP_INFO(this->get_logger(), "Serial port opened: %s at %d baud", port_name.c_str(), baud_rate);
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "Failed to open serial port: %s", e.what());
             rclcpp::shutdown();
