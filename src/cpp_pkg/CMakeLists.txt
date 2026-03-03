@@ -8,11 +8,21 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
 
-add_executable(my_first_node src/my_first_node.cpp)
-target_link_libraries(my_first_node PUBLIC rclcpp::rclcpp)
+# reader node
+add_executable(reader src/reader.cpp)
+target_link_libraries(reader PUBLIC
+rclcpp::rclcpp
+)
+
+# writer node
+add_executable(writer src/writer.cpp)
+target_link_libraries(writer PUBLIC rclcpp::rclcpp)
+
 install(TARGETS
-  my_first_node
+  reader
+  writer
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
