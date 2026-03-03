@@ -12,7 +12,7 @@ public:
     WaveformBuilder() : Node("waveform_builder"), recording_active_(false)
     {
         // Declare parameters
-        this->declare_parameter("sounds_folder", "/home/salva/iaac/ai4all/rosnetwork/sounds");
+        this->declare_parameter("sounds_folder", std::string(std::getenv("HOME")) + "/rosnetwork/sounds");
         this->declare_parameter("recording_duration", 30.0);
         this->declare_parameter("sample_rate", 44100);
         

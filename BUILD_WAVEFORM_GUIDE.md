@@ -16,7 +16,7 @@ This ROS2 node receives button press data from Arduino (via the `arduino_data` t
 ### 1. Place Sound Files
 Add your .wav files to the `sounds/` folder:
 ```bash
-/home/salva/iaac/ai4all/rosnetwork/sounds/
+<workspace>/sounds/
 ├── button_1.wav
 ├── button_2.wav
 ├── ...
@@ -25,7 +25,7 @@ Add your .wav files to the `sounds/` folder:
 
 ### 2. Build the Package
 ```bash
-cd /home/salva/iaac/ai4all/rosnetwork
+cd <workspace>
 colcon build --packages-select cpp_pkg
 source install/setup.bash
 ```
