@@ -1,5 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8_multi_array.hpp>
 #include <onnxruntime_cxx_api.h>
 #include <vector>
 #include <string>
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <map>
 
 class YAMNetClassifier : public rclcpp::Node
 {
@@ -21,6 +23,9 @@ public:
         this->declare_parameter("input_sample_rate", 44100);
         this->declare_parameter("yamnet_sample_rate", 16000);
         this->declare_parameter("waveform_file_check_interval", 1.0);
+        this->declare_parameter("model_color_r", 255);  // Red channel for this model
+        this->declare_parameter("model_color_g", 0);    // Green channel
+        this->declare_parameter("model_color_b", 0);    // Blue channel
         
         model_path_ = this->get_parameter("model_path").as_string();
         class_names_path_ = this->get_parameter("class_names_path").as_string();
@@ -28,6 +33,9 @@ public:
         output_topic_ = this->get_parameter("output_topic").as_string();
         input_sample_rate_ = this->get_parameter("input_sample_rate").as_int();
         yamnet_sample_rate_ = this->get_parameter("yamnet_sample_rate").as_int();
+        model_color_r_ = this->get_parameter("model_color_r").as_int();
+        model_color_g_ = this->get_parameter("model_color_g").as_int();
+        model_color_b_ = this->get_parameter("model_color_b").as_int();
         
         // Load class names
         load_class_names();
@@ -44,6 +52,9 @@ public:
         
         // Publisher for classification results
         classification_pub_ = this->create_publisher<std_msgs::msg::String>(output_topic_, 10);
+        
+        // Publisher for LED paint commands
+        paint_pub_ = this->create_publisher<std_msgs::msg::String>("led_paint_commands", 10);
         
         // Timer to check for new waveform files
         double check_interval = this->get_parameter("waveform_file_check_interval").as_double();
@@ -291,8 +302,30 @@ private:
         auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
         
         size_t num_classes = output_shape[output_shape.size() - 1];
+        size_t num_frames = 1;
+        if (output_shape.size() > 1) {
+            num_frames = output_shape[0];
+        }
         
-        // Get top-k predictions
+        // Store frame-by-frame predictions for time-based analysis
+        frame_predictions_.clear();
+        
+        for (size_t frame = 0; frame < num_frames; frame++) {
+            std::vector<std::pair<int, float>> frame_preds;
+            size_t offset = frame * num_classes;
+            
+            for (size_t i = 0; i < num_classes; i++) {
+                frame_preds.push_back({static_cast<int>(i), output_data[offset + i]});
+            }
+            
+            // Sort by score
+            std::sort(frame_preds.begin(), frame_preds.end(),
+                     [](const auto& a, const auto& b) { return a.second > b.second; });
+            
+            frame_predictions_.push_back(frame_preds);
+        }
+        
+        // Aggregate predictions across all frames
         std::vector<std::pair<int, float>> predictions;
         for (size_t i = 0; i < num_classes; i++) {
             predictions.push_back({static_cast<int>(i), output_data[i]});
@@ -317,6 +350,9 @@ private:
         std::string result_msg = "[" + model_name_ + "] Classification Results:\n";
         result_msg += "File: " + waveform_file + "\n";
         
+        // Find time segments for top predictions
+        std::map<int, std::vector<std::pair<double, double>>> class_time_segments;
+        
         for (int i = 0; i < std::min(top_k, static_cast<int>(predictions.size())); i++) {
             int class_id = predictions[i].first;
             float score = predictions[i].second;
@@ -329,12 +365,100 @@ private:
             
             result_msg += std::to_string(i + 1) + ". " + class_name + ": " + 
                          std::to_string(score) + "\n";
+            
+            // Find time segments where this class was dominant
+            auto segments = find_time_segments_for_class(class_id, 0.3);  // threshold
+            class_time_segments[class_id] = segments;
+            
+            // Log time segments
+            if (!segments.empty()) {
+                RCLCPP_INFO(this->get_logger(), "     Time segments: ");
+                for (const auto& seg : segments) {
+                    RCLCPP_INFO(this->get_logger(), "       %.2fs - %.2fs", seg.first, seg.second);
+                }
+            }
         }
         
         // Publish results
         auto msg = std_msgs::msg::String();
         msg.data = result_msg;
         classification_pub_->publish(msg);
+        
+        // Send paint commands for top prediction time segments
+        if (!predictions.empty() && !class_time_segments.empty()) {
+            int top_class = predictions[0].first;
+            auto& segments = class_time_segments[top_class];
+            
+            for (const auto& segment : segments) {
+                send_paint_command(segment.first, segment.second);
+            }
+        }
+    }
+    
+    std::vector<std::pair<double, double>> find_time_segments_for_class(int class_id, float threshold)
+    {
+        std::vector<std::pair<double, double>> segments;
+        
+        if (frame_predictions_.empty()) {
+            return segments;
+        }
+        
+        // YAMNet produces predictions at ~96ms intervals
+        const double frame_duration = 0.096;  // seconds per frame
+        const double recording_duration = 30.0;  // 30 seconds total
+        const double frames_per_second = 1.0 / frame_duration;
+        
+        bool in_segment = false;
+        double segment_start = 0.0;
+        
+        for (size_t frame_idx = 0; frame_idx < frame_predictions_.size(); frame_idx++) {
+            double time = frame_idx * frame_duration;
+            const auto& frame_preds = frame_predictions_[frame_idx];
+            
+            // Check if this class is in top 3 for this frame
+            bool class_active = false;
+            for (int i = 0; i < std::min(3, static_cast<int>(frame_preds.size())); i++) {
+                if (frame_preds[i].first == class_id && frame_preds[i].second > threshold) {
+                    class_active = true;
+                    break;
+                }
+            }
+            
+            if (class_active && !in_segment) {
+                // Start new segment
+                in_segment = true;
+                segment_start = time;
+            } else if (!class_active && in_segment) {
+                // End current segment
+                in_segment = false;
+                segments.push_back({segment_start, time});
+            }
+        }
+        
+        // Close final segment if still open
+        if (in_segment) {
+            segments.push_back({segment_start, frame_predictions_.size() * frame_duration});
+        }
+        
+        return segments;
+    }
+    
+    void send_paint_command(double start_time, double end_time)
+    {
+        // Send command to paint LED matrix columns with model color
+        // Format: "PAINT,start_time,end_time,R,G,B"
+        std::string command = "PAINT," + 
+                             std::to_string(start_time) + "," +
+                             std::to_string(end_time) + "," +
+                             std::to_string(model_color_r_) + "," +
+                             std::to_string(model_color_g_) + "," +
+                             std::to_string(model_color_b_);
+        
+        auto msg = std_msgs::msg::String();
+        msg.data = command;
+        paint_pub_->publish(msg);
+        
+        RCLCPP_INFO(this->get_logger(), "Sent paint command: %s", command.c_str());
     }
     
     // Public method to classify a waveform file (can be called via service in future)
@@ -358,12 +482,19 @@ private:
     std::string output_topic_;
     int input_sample_rate_;
     int yamnet_sample_rate_;
+    int model_color_r_;
+    int model_color_g_;
+    int model_color_b_;
     
     // Class names
     std::vector<std::string> class_names_;
     
+    // Frame-by-frame predictions for time analysis
+    std::vector<std::vector<std::pair<int, float>>> frame_predictions_;
+    
     // ROS objects
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr classification_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr paint_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 
