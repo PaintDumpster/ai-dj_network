@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROS2 Audio Classification Interface</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>🎵 ROS2 Audio Classification System</h1>
+        <div class="status">
+            <span id="connection-status" class="status-disconnected">● Disconnected</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Arduino Button Monitor -->
+        <section class="card">
+            <h2>🎹 Arduino Button Presses</h2>
+            <div id="arduino-buttons" class="button-grid">
+                <div class="button" data-button="1">1</div>
+                <div class="button" data-button="2">2</div>
+                <div class="button" data-button="3">3</div>
+                <div class="button" data-button="4">4</div>
+                <div class="button" data-button="5">5</div>
+                <div class="button" data-button="6">6</div>
+                <div class="button" data-button="7">7</div>
+                <div class="button" data-button="8">8</div>
+                <div class="button" data-button="9">9</div>
+                <div class="button" data-button="10">10</div>
+            </div>
+            <div class="event-log" id="arduino-log"></div>
+        </section>
+
+        <!-- Waveform Visualization (Placeholder) -->
+        <section class="card">
+            <h2>📊 Waveform Building</h2>
+            <div id="waveform-canvas">
+                <p class="placeholder">Waveform visualization will appear here during recording</p>
+            </div>
+        </section>
+
+        <!-- YAMNet Classification Results -->
+        <section class="card">
+            <h2>🤖 YAMNet Classification Results</h2>
+            <div class="models-container">
+                <!-- Model 1 -->
+                <div class="model-results">
+                    <h3>Model 1: Original</h3>
+                    <div id="model1-results" class="results-list">
+                        <p class="no-data">Waiting for classification...</p>
+                    </div>
+                </div>
+
+                <!-- Model 2 -->
+                <div class="model-results">
+                    <h3>Model 2: Dataset A</h3>
+                    <div id="model2-results" class="results-list">
+                        <p class="no-data">Waiting for classification...</p>
+                    </div>
+                </div>
+
+                <!-- Model 3 -->
+                <div class="model-results">
+                    <h3>Model 3: Dataset B</h3>
+                    <div id="model3-results" class="results-list">
+                        <p class="no-data">Waiting for classification...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- API Endpoints Info -->
+        <section class="card info-card">
+            <h2>ℹ️ API Information</h2>
+            <div class="api-info">
+                <p><strong>WebSocket:</strong> <code>ws://localhost:8000/ws</code></p>
+                <p><strong>REST API:</strong> <code>http://localhost:8000/api/...</code></p>
+                <p><strong>Endpoints:</strong></p>
+                <ul>
+                    <li><code>GET /api/arduino/latest</code> - Latest Arduino data</li>
+                    <li><code>GET /api/classifications</code> - All model results</li>
+                    <li><code>GET /api/classifications/{model_name}</code> - Specific model</li>
+                </ul>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>ROS2 Audio Classification System | Connected to FastAPI Bridge</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

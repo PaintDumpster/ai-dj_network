@@ -25,6 +25,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'web_bridge = py_pkg.web_bridge:main',
         ],
     },
 )

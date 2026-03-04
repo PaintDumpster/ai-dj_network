@@ -1,0 +1,233 @@
+:root {
+    --primary-color: #2563eb;
+    --secondary-color: #10b981;
+    --danger-color: #ef4444;
+    --bg-color: #0f172a;
+    --card-bg: #1e293b;
+    --text-color: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+header {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    padding: 1.5rem 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+header h1 {
+    font-size: 1.8rem;
+}
+
+.status {
+    font-size: 0.9rem;
+}
+
+.status-connected {
+    color: var(--secondary-color);
+}
+
+.status-disconnected {
+    color: var(--danger-color);
+}
+
+main {
+    max-width: 1400px;
+    margin: 2rem auto;
+    padding: 0 2rem;
+    display: grid;
+    gap: 2rem;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+.card h2 {
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+    font-size: 1.5rem;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+/* Arduino Buttons */
+.button-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.button {
+    background-color: var(--border-color);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    cursor: default;
+}
+
+.button.active {
+    background-color: var(--secondary-color);
+    transform: scale(1.1);
+    box-shadow: 0 0 20px var(--secondary-color);
+}
+
+.event-log {
+    background-color: var(--bg-color);
+    border-radius: 8px;
+    padding: 1rem;
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+}
+
+.event-log p {
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Waveform */
+#waveform-canvas {
+    background-color: var(--bg-color);
+    border-radius: 8px;
+    padding: 2rem;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Classification Results */
+.models-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.model-results {
+    background-color: var(--bg-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.model-results h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+    font-size: 1.2rem;
+}
+
+.results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.result-item {
+    background-color: var(--card-bg);
+    padding: 0.8rem;
+    border-radius: 6px;
+    border-left: 3px solid var(--secondary-color);
+}
+
+.result-item .class-name {
+    font-weight: bold;
+    color: var(--text-color);
+}
+
+.result-item .confidence {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.no-data {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+}
+
+/* API Info */
+.info-card {
+    background-color: var(--card-bg);
+}
+
+.api-info code {
+    background-color: var(--bg-color);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    color: var(--secondary-color);
+}
+
+.api-info ul {
+    margin-left: 2rem;
+    margin-top: 0.5rem;
+}
+
+.api-info li {
+    padding: 0.3rem 0;
+}
+
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-color);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .button-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .models-container {
+        grid-template-columns: 1fr;
+    }
+}
