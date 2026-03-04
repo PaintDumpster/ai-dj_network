@@ -34,7 +34,7 @@ This ROS2-based system integrates:
 │  - Saves CSV     │     └──────────┬──────────┘ │
 └────────┬─────────┘                ▼            │
          │                  ┌──────────────┐     │
-         │ waveform.csv     │    writer    │   ──┘
+         │ waveform.csv     │    writer    │─────┘
          ▼                  │  LED sender  │
 ┌────────────────────────┐  └──────▲───────┘
 │ yamnet_classification  │         │
@@ -64,6 +64,52 @@ This ROS2-based system integrates:
 - Protocol: Compressed format (position + RGB values)
 - USB: Native USB JTAG/serial debug unit
 
+## ✅ Current Status
+
+### Hardware & Arduino
+- ✅ **Arduino Uno R3** configured with 4x4 Elegoo membrane keypad
+- ✅ **Button sketch** (`sketches/button_reader/`) uploaded and tested
+- ✅ **ESP32** connected and recognized at `/dev/ttyACM1`
+- ⏳ **ESP32 LED sketch** - Not yet implemented
+- 🔧 **Keypad layout**:
+  ```
+  1  2  3  a     →  Buttons 1-3 (sound triggers)
+  4  5  6  b     →  Buttons 4-6 (sound triggers)
+  7  8  9  c     →  Buttons 7-9 (sound triggers)
+  *  0  #  d     →  Button 11 (*), Button 10 (0)
+  ```
+
+### ROS2 Nodes
+- ✅ **reader** - Fully tested, publishes button presses to topics
+  - `/arduino_data` for buttons 1-10
+  - `/state_control` for button 11 (start/stop recording)
+- ✅ **build_waveform** - Fully tested
+  - Generates placeholder sine waves (220-880 Hz) for missing sound files
+  - Publishes real-time LED matrix data (42×146)
+  - Saves CSV waveforms to `/tmp/waveform_<timestamp>.csv` (661k samples, ~12 MB)
+  - Recording controlled by button 11 or ROS2 services
+- ✅ **writer** - Running and sending data
+  - Receiving LED matrix data
+  - Formatting and sending to ESP32 via serial
+  - Compressed format: `MATRIX:42x146:row,col,R,G,B;...`
+- ⏳ **yamnet_classification** - Not yet tested
+- ⏳ **web_bridge** - Not yet tested
+
+### Test Results
+- ✅ Button presses detected and logged
+- ✅ State control (button 11) toggles recording
+- ✅ Waveform generation working with placeholder audio
+- ✅ LED matrix data published and transmitted
+- ⏳ LED display not visible yet (ESP32 sketch needed)
+- ⏳ YAMNet classification pending
+
+### Next Steps
+1. **Create ESP32 sketch** for LED matrix control
+2. **Add sound files** to `sounds/` directory (optional - placeholders work)
+3. **Set up YAMNet models** for audio classification
+4. **Test classification** and color overlays
+5. **Implement web interface** for remote monitoring
+
 ## 📦 Package Structure
 
 ```
@@ -81,8 +127,11 @@ rosnetwork/
 │   └── py_pkg/               # Python nodes
 │       └── py_pkg/
 │           └── web_bridge.py             # Web interface bridge
+├── sketches/                 # Arduino sketches
+│   ├── button_reader/        # Arduino Uno keypad reader (TESTED ✅)
+│   └── README.md             # Arduino setup instructions
 ├── models/                   # YAMNet ONNX models
-├── sounds/                   # Button sound files
+├── sounds/                   # Button sound files (optional)
 ├── webapp/                   # Web visualization
 └── setup_onnxruntime.sh     # ONNX Runtime installer
 
@@ -201,6 +250,67 @@ Or use the launch file for multiple models:
 ros2 launch cpp_pkg three_yamnet_models.launch.py
 ```
 
+## ✅ Tested Configuration (March 2026)
+
+Successfully tested with minimal setup - no sound files or YAMNet models required:
+
+### Hardware
+- Arduino Uno R3 (ATmega16U2) on `/dev/ttyACM0`
+- Elegoo 4x4 membrane keypad connected to pins 2-9
+- ESP32 (USB JTAG) on `/dev/ttyACM1`
+
+### Arduino Setup
+```bash
+# Install Keypad library
+arduino-cli lib install Keypad
+
+# Compile and upload
+cd sketches/button_reader
+arduino-cli compile --fqbn arduino:avr:uno .
+arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:uno .
+```
+
+### ROS2 System Test
+```bash
+# Build
+cd ~/iaac/ai4all/rosnetwork
+colcon build --packages-select cpp_pkg
+source install/setup.bash
+
+# Terminal 1: Reader
+ros2 run cpp_pkg reader
+
+# Terminal 2: Waveform Builder
+ros2 run cpp_pkg build_waveform --ros-args \
+  -p sounds_folder:=/home/salva/iaac/ai4all/rosnetwork/sounds
+
+# Terminal 3: Writer
+ros2 run cpp_pkg writer
+```
+
+### Test Procedure
+1. Press `*` button → Starts recording (30 seconds)
+2. Press number buttons 0-9 → Generates placeholder sine waves
+3. Wait 30s or press `*` again → Stops recording
+4. Check output: `/tmp/waveform_<timestamp>.csv` (~12 MB, 661k samples)
+
+### Test Results
+- ✅ All buttons detected correctly
+- ✅ Button 11 (*) toggles recording on/off
+- ✅ Placeholder audio generated (220-880 Hz sine waves)
+- ✅ Real-time LED matrix data published to `/led_matrix` topic
+- ✅ CSV waveform saved successfully
+- ✅ Writer sending formatted data to ESP32 serial port
+
+### Topics Active During Test
+```bash
+$ ros2 topic list
+/arduino_data         # Buttons 1-10
+/state_control        # Button 11
+/led_matrix          # 42×146 grayscale waveform
+/led_paint_commands  # Color overlay commands
+```
+
 ## 🎵 Node Descriptions
 
 ### reader (Button Input - Arduino Uno)
@@ -293,7 +403,7 @@ Example: PAINT,2.5,5.0,255,0,0
 
 ## 🔧 Configuration
 
-### Sound Files
+### Sound Files (Optional - Tested without!)
 Place 10 WAV files in `sounds/`:
 ```
 sounds/button_1.wav
@@ -301,7 +411,19 @@ sounds/button_2.wav
 ...
 sounds/button_10.wav
 ```
-If missing, generates placeholder sine waves (220-880 Hz).
+**If missing, automatically generates placeholder sine waves:**
+- Button 1: 220 Hz (A3)
+- Button 2: 247 Hz (B3)
+- Button 3: 262 Hz (C4 - Middle C)
+- Button 4: 294 Hz (D4)
+- Button 5: 330 Hz (E4)
+- Button 6: 349 Hz (F4)
+- Button 7: 392 Hz (G4)
+- Button 8: 440 Hz (A4)
+- Button 9: 494 Hz (B4)
+- Button 10: 880 Hz (A5)
+
+This allows **full system testing without any audio files!** ✅
 
 ### Multiple Model Setup
 To run different models with different colors:
@@ -342,6 +464,56 @@ Full list in `models/yamnet_class_names.txt` after setup.
 
 ## 🛠️ Troubleshooting
 
+### Serial Port Permission Denied
+The most common issue during testing:
+```bash
+# Permanent fix (requires logout/login):
+sudo usermod -a -G dialout $USER
+# Then log out and back in
+
+# Temporary fix (for current session):
+sudo chmod 666 /dev/ttyACM0
+sudo chmod 666 /dev/ttyACM1
+```
+
+### Both Arduino and ESP32 show as ttyACM (not ttyUSB)
+This is correct for:
+- Arduino Uno R3 (ATmega16U2 USB chip) → `/dev/ttyACM0`
+- ESP32 with native USB JTAG → `/dev/ttyACM1`
+
+Check with:
+```bash
+lsusb
+# Should show:
+# Arduino SA Uno R3 (CDC ACM)
+# Espressif USB JTAG/serial debug unit
+
+ls -l /dev/ttyACM*
+```
+
+### Button 11 not triggering recording
+If button 11 presses don't start/stop recording, check that the reader is stripping carriage returns:
+```bash
+# Check topic data (should show "11", not "11\r"):
+ros2 topic echo /state_control
+
+# If you see "\r", rebuild with latest code
+cd ~/iaac/ai4all/rosnetwork
+colcon build --packages-select cpp_pkg
+```
+
+### No waveform being built
+Make sure to press button 11 (*) to **start recording** before pressing sound buttons.
+
+### Arduino not detected
+```bash
+# List serial ports
+ls /dev/ttyUSB* /dev/ttyACM*
+
+# Check which device it is
+lsusb | grep -i arduino
+```
+
 ### ONNX Runtime not found
 ```bash
 # Check installation
@@ -350,16 +522,6 @@ sudo ldconfig
 
 # If still not found, add to LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH
-```
-
-### Arduino not detected
-```bash
-# List serial ports
-ls /dev/ttyUSB* /dev/ttyACM*
-
-# Add user to dialout group
-sudo usermod -a -G dialout $USER
-# Log out and back in
 ```
 
 ### Build errors
