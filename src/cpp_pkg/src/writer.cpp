@@ -52,7 +52,7 @@ public:
 private:
     void matrix_callback(const std_msgs::msg::UInt8MultiArray::SharedPtr msg)
     {
-        if (msg->data.size() != matrix_height_ * matrix_width_) {
+        if (msg->data.size() != static_cast<size_t>(matrix_height_ * matrix_width_)) {
             RCLCPP_WARN(this->get_logger(), "Received matrix size mismatch: expected %d, got %zu",
                        matrix_height_ * matrix_width_, msg->data.size());
             return;

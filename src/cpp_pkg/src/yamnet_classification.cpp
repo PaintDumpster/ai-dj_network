@@ -405,8 +405,6 @@ private:
         
         // YAMNet produces predictions at ~96ms intervals
         const double frame_duration = 0.096;  // seconds per frame
-        const double recording_duration = 30.0;  // 30 seconds total
-        const double frames_per_second = 1.0 / frame_duration;
         
         bool in_segment = false;
         double segment_start = 0.0;

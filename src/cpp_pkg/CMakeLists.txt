@@ -44,7 +44,10 @@ target_link_libraries(reader PUBLIC
 
 # writer node
 add_executable(writer src/writer.cpp)
-target_link_libraries(writer PUBLIC rclcpp::rclcpp)
+target_link_libraries(writer PUBLIC
+  rclcpp::rclcpp
+  ${std_msgs_TARGETS}
+)
 
 # build_waveform node
 add_executable(build_waveform src/build_waveform.cpp)
