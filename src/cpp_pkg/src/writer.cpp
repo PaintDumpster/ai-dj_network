@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include "cpp_pkg/serial_port.hpp"
 
 class LEDMatrixWriter : public rclcpp::Node
 {
@@ -20,11 +21,23 @@ public:
         display_matrix_.resize(matrix_height_ * matrix_width_ * 3, 0);
         
         // Declare parameters
-        this->declare_parameter("serial_port", std::string("/dev/ttyACM0"));
+        this->declare_parameter("serial_port", std::string("/dev/ttyACM1"));
+        this->declare_parameter("baud_rate", 115200);  // Higher baud rate for LED data
         this->declare_parameter("update_rate", 0.1);  // 10 Hz update rate
         
         serial_port_ = this->get_parameter("serial_port").as_string();
+        int baud_rate = this->get_parameter("baud_rate").as_int();
         double update_rate = this->get_parameter("update_rate").as_double();
+        
+        // Initialize serial connection to LED board
+        try {
+            serial_ = std::make_unique<SerialPort>(serial_port_, baud_rate);
+            RCLCPP_INFO(this->get_logger(), "LED board serial port opened: %s at %d baud", 
+                       serial_port_.c_str(), baud_rate);
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to open LED board serial port: %s", e.what());
+            throw;
+        }
         
         // Subscribe to LED matrix data from waveform builder
         matrix_subscription_ = this->create_subscription<std_msgs::msg::UInt8MultiArray>(
@@ -187,32 +200,33 @@ private:
             return;
         }
         
-        // TODO: Implement actual serial communication to Arduino
-        // For now, just log that we would send data
+        if (!serial_) {
+            RCLCPP_WARN_ONCE(this->get_logger(), "Serial connection not available");
+            return;
+        }
         
-        // Count non-black pixels
-        int active_pixels = 0;
-        for (size_t i = 0; i < display_matrix_.size(); i += 3) {
-            if (display_matrix_[i] > 0 || display_matrix_[i+1] > 0 || display_matrix_[i+2] > 0) {
-                active_pixels++;
+        // Format and send matrix data to LED board
+        try {
+            std::string data = format_matrix_for_arduino();
+            serial_->writeline(data + "\n");
+            
+            // Count active pixels for logging
+            int active_pixels = 0;
+            for (size_t i = 0; i < display_matrix_.size(); i += 3) {
+                if (display_matrix_[i] > 0 || display_matrix_[i+1] > 0 || display_matrix_[i+2] > 0) {
+                    active_pixels++;
+                }
             }
+            
+            // Only log periodically to avoid spam
+            static int log_counter = 0;
+            if (log_counter++ % 10 == 0) {
+                RCLCPP_INFO(this->get_logger(), "Sent matrix to LED board: %d active pixels, %zu bytes", 
+                           active_pixels, data.length());
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to send data to LED board: %s", e.what());
         }
-        
-        // Only log periodically to avoid spam
-        static int log_counter = 0;
-        if (log_counter++ % 10 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Would send matrix to Arduino: %d active pixels", 
-                       active_pixels);
-        }
-        
-        // Format for Arduino:
-        // - Could send as compressed format (only send changed pixels)
-        // - Could send as binary stream
-        // - For now, just demonstrate the concept
-        
-        // Example serial write (uncomment when serial is available):
-        // std::string data = format_matrix_for_arduino();
-        // write_to_serial(data);
     }
     
     std::string format_matrix_for_arduino()
@@ -256,6 +270,7 @@ private:
     bool matrix_updated_ = false;
     
     std::string serial_port_;
+    std::unique_ptr<SerialPort> serial_;
     
     rclcpp::Subscription<std_msgs::msg::UInt8MultiArray>::SharedPtr matrix_subscription_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr paint_subscription_;

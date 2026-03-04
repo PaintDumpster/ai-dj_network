@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 # Try to find ONNX Runtime (optional for yamnet_classification node)
 find_path(ONNXRUNTIME_INCLUDE_DIR 
@@ -43,7 +44,11 @@ target_link_libraries(reader PUBLIC
 )
 
 # writer node
-add_executable(writer src/writer.cpp)
+add_executable(writer src/writer.cpp src/serial_port.cpp)
+target_include_directories(writer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 target_link_libraries(writer PUBLIC
   rclcpp::rclcpp
   ${std_msgs_TARGETS}
@@ -54,6 +59,7 @@ add_executable(build_waveform src/build_waveform.cpp)
 target_link_libraries(build_waveform PUBLIC
   rclcpp::rclcpp
   ${std_msgs_TARGETS}
+  ${std_srvs_TARGETS}
 )
 
 # yamnet_classification node (only if ONNX Runtime is available)
@@ -67,6 +73,7 @@ if(ONNXRUNTIME_FOUND)
   target_link_libraries(yamnet_classification PUBLIC
     rclcpp::rclcpp
     ${std_msgs_TARGETS}
+    ${std_srvs_TARGETS}
     ${ONNXRUNTIME_LIB}
   )
   list(APPEND TARGETS_TO_INSTALL yamnet_classification)

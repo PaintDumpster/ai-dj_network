@@ -1,6 +1,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8_multi_array.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -40,6 +41,12 @@ public:
             std::bind(&WaveformBuilder::arduino_callback, this, std::placeholders::_1)
         );
         
+        // Subscribe to state control (button 11)
+        state_control_subscription_ = this->create_subscription<std_msgs::msg::String>(
+            "state_control", 10,
+            std::bind(&WaveformBuilder::state_control_callback, this, std::placeholders::_1)
+        );
+        
         // Publisher for LED matrix data
         matrix_publisher_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("led_matrix", 10);
         
@@ -47,6 +54,17 @@ public:
         matrix_timer_ = this->create_wall_timer(
             std::chrono::duration<double>(matrix_update_rate),
             std::bind(&WaveformBuilder::publish_matrix, this)
+        );
+        
+        // Services for external control
+        start_recording_service_ = this->create_service<std_srvs::srv::Trigger>(
+            "start_recording",
+            std::bind(&WaveformBuilder::handle_start_recording, this, std::placeholders::_1, std::placeholders::_2)
+        );
+        
+        stop_recording_service_ = this->create_service<std_srvs::srv::Trigger>(
+            "stop_recording",
+            std::bind(&WaveformBuilder::handle_stop_recording, this, std::placeholders::_1, std::placeholders::_2)
         );
         
         // Load sound file paths
@@ -77,11 +95,24 @@ private:
         }
     }
     
-    void arduino_callback(const std_msgs::msg::String::SharedPtr msg)
+    void state_control_callback(const std_msgs::msg::String::SharedPtr msg)
     {
-        // Start recording on first button press
+        (void)msg;  // Unused parameter - we just toggle on button press
+        // Button 11 toggles recording on/off
         if (!recording_active_) {
             start_recording();
+            RCLCPP_INFO(this->get_logger(), "Recording started by button 11");
+        } else {
+            stop_recording();
+            RCLCPP_INFO(this->get_logger(), "Recording stopped by button 11");
+        }
+    }
+    
+    void arduino_callback(const std_msgs::msg::String::SharedPtr msg)
+    {
+        // Only process if recording is active (controlled by service call or button 11)
+        if (!recording_active_) {
+            return;
         }
         
         // Check if recording time has elapsed
@@ -108,6 +139,42 @@ private:
         } catch (const std::exception& e) {
             RCLCPP_WARN(this->get_logger(), "Failed to parse button data: %s", msg->data.c_str());
         }
+    }
+    
+    void handle_start_recording(
+        const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+        std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+    {
+        (void)request;
+        
+        if (recording_active_) {
+            response->success = false;
+            response->message = "Recording already in progress";
+            return;
+        }
+        
+        start_recording();
+        response->success = true;
+        response->message = "Recording started";
+        RCLCPP_INFO(this->get_logger(), "Recording started via service call");
+    }
+    
+    void handle_stop_recording(
+        const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+        std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+    {
+        (void)request;
+        
+        if (!recording_active_) {
+            response->success = false;
+            response->message = "No recording in progress";
+            return;
+        }
+        
+        stop_recording();
+        response->success = true;
+        response->message = "Recording stopped. Waveform saved to: " + last_waveform_file_;
+        RCLCPP_INFO(this->get_logger(), "Recording stopped via service call");
     }
     
     void start_recording()
@@ -262,8 +329,10 @@ private:
                 file << point.time << "," << point.amplitude << "\n";
             }
             file.close();
+            last_waveform_file_ = output_file;
             RCLCPP_INFO(this->get_logger(), "Waveform saved to: %s", output_file.c_str());
         } else {
+            last_waveform_file_ = "";
             RCLCPP_ERROR(this->get_logger(), "Failed to save waveform to file");
         }
     }
@@ -276,8 +345,13 @@ private:
     
     // Member variables
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr state_control_subscription_;
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr matrix_publisher_;
     rclcpp::TimerBase::SharedPtr matrix_timer_;
+    
+    // Services
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_recording_service_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_recording_service_;
     
     std::string sounds_folder_;
     double recording_duration_;
@@ -290,6 +364,7 @@ private:
     
     std::map<int, std::string> sound_mappings_;
     std::vector<WaveformPoint> waveform_matrix_;
+    std::string last_waveform_file_;
     
     bool recording_active_;
     std::chrono::steady_clock::time_point recording_start_time_;

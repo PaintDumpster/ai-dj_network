@@ -7,7 +7,7 @@ class reader : public rclcpp::Node
 public:
     reader() : Node("reader")
     {
-        this->declare_parameter("port", "/dev/ttyUSB0");
+        this->declare_parameter("port", "/dev/ttyACM0");
         this->declare_parameter("baud_rate", 9600);
 
         std::string port_name = this->get_parameter("port").as_string();
@@ -23,25 +23,49 @@ public:
         }
 
         publisher_ = this->create_publisher<std_msgs::msg::String>("arduino_data", 10);
+        state_control_publisher_ = this->create_publisher<std_msgs::msg::String>("state_control", 10);
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(100),
             std::bind(&reader::read_and_publish, this)
         );
     }
 private:
+    std::string trim(const std::string& str)
+    {
+        // Remove leading and trailing whitespace (including \r and \n)
+        size_t start = str.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) return "";
+        size_t end = str.find_last_not_of(" \t\r\n");
+        return str.substr(start, end - start + 1);
+    }
+    
     void read_and_publish()
     {
         std::string data = serial_->readline();
         if (!data.empty()) {
+            // Strip whitespace and carriage returns
+            data = trim(data);
+            
+            if (data.empty()) return;
+            
             auto message = std_msgs::msg::String();
             message.data = data;
-            publisher_->publish(message);
-            RCLCPP_INFO(this->get_logger(), "Published: '%s'", message.data.c_str());
+            
+            // Button 11 is for state control, publish to separate topic
+            if (data == "11") {
+                state_control_publisher_->publish(message);
+                RCLCPP_INFO(this->get_logger(), "State control button pressed");
+            } else {
+                // Buttons 1-10 are for sounds
+                publisher_->publish(message);
+                RCLCPP_INFO(this->get_logger(), "Published: '%s'", message.data.c_str());
+            }
         }
     }
 
     std::unique_ptr<SerialPort> serial_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_control_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

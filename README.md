@@ -5,7 +5,9 @@ An interactive audio system that uses Arduino button inputs to build live wavefo
 ## 🎯 Project Overview
 
 This ROS2-based system integrates:
-- **Hardware Interface**: Arduino with 10 buttons for live audio composition
+- **Hardware Interface**: Two controller boards
+  - **Button Input Board** (Arduino Uno @ /dev/ttyACM0): 10 buttons for live audio composition + state control
+  - **LED Control Board** (ESP32 @ /dev/ttyACM1): RGB LED matrix driver (42×146 pixels)
 - **Waveform Generation**: Real-time audio waveform building from button presses
 - **Multi-Model Classification**: Parallel YAMNet models for audio event detection
 - **LED Visualization**: 42×146 RGB matrix displaying waveforms with classification highlights
@@ -14,26 +16,28 @@ This ROS2-based system integrates:
 ## 🏗️ System Architecture
 
 ```
-┌─────────────┐
-│   Arduino   │ (10 buttons)
-│  /ttyUSB0   │
-└──────┬──────┘
-       │ Serial
-       ▼
-┌──────────────┐
-│    reader    │ → arduino_data topic
-└──────┬───────┘
-       ▼
-┌──────────────────┐     ┌─────────────────────┐
-│ build_waveform   │────→│   led_matrix topic  │
-│  - Builds audio  │     │   (42×146 matrix)   │
-│  - Saves CSV     │     └──────────┬──────────┘
-└────────┬─────────┘                ▼
-         │                   ┌──────────────┐
-         │ waveform.csv     │    writer    │
-         ▼                   │ LED Matrix I/O│
-┌────────────────────────┐  └──────────────┘
-│ yamnet_classification  │         ▲
+┌──────────────────┐                    ┌──────────────────┐
+│  Arduino Uno     │                    │      ESP32       │
+│   Button Input   │                    │   LED Matrix     │
+│   /dev/ttyACM0   │                    │   /dev/ttyACM1   │
+│  (10 + 1 button) │                    │   (42×146 RGB)   │
+└────────┬─────────┘                    └────────▲─────────┘
+         │ Serial                                │ Serial
+         ▼                                       │
+┌──────────────┐                                 │
+│    reader    │ → arduino_data topic            │
+└──────┬───────┘                                 │
+       ▼                                         │
+┌──────────────────┐     ┌─────────────────────┐ │
+│ build_waveform   │────→│   led_matrix topic  │ │
+│  - Builds audio  │     │   (42×146 matrix)   │ │
+│  - Saves CSV     │     └──────────┬──────────┘ │
+└────────┬─────────┘                ▼            │
+         │                  ┌──────────────┐     │
+         │ waveform.csv     │    writer    │   ──┘
+         ▼                  │  LED sender  │
+┌────────────────────────┐  └──────▲───────┘
+│ yamnet_classification  │         │
 │   - Model 1 (Red)      │         │
 │   - Model 2 (Green)    │─────────┘
 │   - Model 3 (Blue)     │  led_paint_commands
@@ -45,6 +49,20 @@ This ROS2-based system integrates:
 │ results topics   │     │   + webapp   │
 └──────────────────┘     └──────────────┘
 ```
+
+### Hardware Configuration
+
+**Board 1 - Button Input** (Arduino Uno R3 → `/dev/ttyACM0` @ 9600 baud)
+- Buttons 1-10: Audio composition triggers
+- Button 11: State control (start/stop recording)
+- Sends button numbers over serial
+- USB Chip: ATmega16U2 (CDC ACM)
+
+**Board 2 - LED Matrix** (ESP32 → `/dev/ttyACM1` @ 115200 baud)
+- Controls 42×146 RGB LED matrix (6,132 pixels)
+- Receives matrix updates and paint commands
+- Protocol: Compressed format (position + RGB values)
+- USB: Native USB JTAG/serial debug unit
 
 ## 📦 Package Structure
 
@@ -160,14 +178,14 @@ source install/setup.bash
 
 # Run complete system (separate terminals)
 
-# Terminal 1: Arduino reader
-ros2 run cpp_pkg reader --ros-args -p port:=/dev/ttyUSB0 -p baud_rate:=9600
+# Terminal 1: Button Input Reader (Arduino Uno)
+ros2 run cpp_pkg reader --ros-args -p port:=/dev/ttyACM0 -p baud_rate:=9600
 
 # Terminal 2: Waveform builder
 ros2 run cpp_pkg build_waveform
 
-# Terminal 3: LED matrix writer
-ros2 run cpp_pkg writer
+# Terminal 3: LED Matrix Writer (ESP32)
+ros2 run cpp_pkg writer --ros-args -p serial_port:=/dev/ttyACM1 -p baud_rate:=115200
 
 # Terminal 4-6: YAMNet classifiers (RGB colors)
 ros2 run cpp_pkg yamnet_classification --ros-args -p model_color_r:=255 -p model_color_g:=0 -p model_color_b:=0
@@ -185,14 +203,17 @@ ros2 launch cpp_pkg three_yamnet_models.launch.py
 
 ## 🎵 Node Descriptions
 
-### reader
-Reads button press data from Arduino via serial port.
-- **Publishes**: `arduino_data` (std_msgs/String) - Button numbers 1-10
-- **Parameters**: `port` (/dev/ttyUSB0), `baud_rate` (9600)
+### reader (Button Input - Arduino Uno)
+Reads button press data from Arduino Uno button board via serial port.
+- **Serial**: `/dev/ttyACM0` @ 9600 baud
+- **Publishes**: 
+  - `arduino_data` (std_msgs/String) - Button numbers 1-10
+  - `state_control` (std_msgs/String) - Button 11 for state control
+- **Parameters**: `port` (/dev/ttyACM0), `baud_rate` (9600)
 
 ### build_waveform
 Builds audio waveforms from button presses and generates LED matrix data.
-- **Subscribes**: `arduino_data`
+- **Subscribes**: `arduino_data`, `state_control`
 - **Publishes**: `led_matrix` (std_msgs/UInt8MultiArray) - 42×146 grayscale waveform
 - **Features**:
   - 30-second recording window
@@ -224,13 +245,22 @@ Performs audio classification using YAMNet and highlights relevant time segments
   - `input_sample_rate`: Source sample rate (44100)
   - `yamnet_sample_rate`: Model sample rate (16000)
 
-### writer
-Receives waveform and paint commands, outputs to LED matrix/Arduino.
+### writer (LED Matrix - ESP32)
+Sends RGB matrix data to ESP32 LED control board via serial port.
+- **Serial**: `/dev/ttyACM1` @ 115200 baud
 - **Subscribes**:
-  - `led_matrix` - Base waveform data
-  - `led_paint_commands` - Classification highlights
+  - `led_matrix` - Base waveform data (42×146 grayscale)
+  - `led_paint_commands` - Classification highlights (RGB overlays)
+- **Publishes**: Compressed matrix data to Arduino LED board
 - **Features**:
-  - RGB matrix composition (42×146×3)
+  - RGB matrix composition (42×146×3 = 6,132 pixels)
+  - Paint overlay management and re-application
+  - Compressed data format (position + RGB values)
+  - 10 Hz update rate (configurable)
+- **Parameters**:
+  - `serial_port`: LED board port (default: /dev/ttyACM1)
+  - `baud_rate`: Communication speed (default: 115200)
+  - `update_rate`: Matrix refresh interval (default: 0.1s)
   - Paint overlay management
   - Serial output formatting (ready for Arduino)
 - **Parameters**:

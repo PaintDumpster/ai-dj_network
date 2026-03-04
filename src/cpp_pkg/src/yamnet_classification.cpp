@@ -1,6 +1,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8_multi_array.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <onnxruntime_cxx_api.h>
 #include <vector>
 #include <string>
@@ -56,12 +57,18 @@ public:
         // Publisher for LED paint commands
         paint_pub_ = this->create_publisher<std_msgs::msg::String>("led_paint_commands", 10);
         
-        // Timer to check for new waveform files
-        double check_interval = this->get_parameter("waveform_file_check_interval").as_double();
-        timer_ = this->create_wall_timer(
-            std::chrono::duration<double>(check_interval),
-            std::bind(&YAMNetClassifier::check_for_waveform, this)
+        // Service for triggering classification
+        classify_service_ = this->create_service<std_srvs::srv::Trigger>(
+            "classify_waveform_" + model_name_,
+            std::bind(&YAMNetClassifier::handle_classify_request, this, std::placeholders::_1, std::placeholders::_2)
         );
+        
+        // Timer to check for new waveform files (disabled when using service-based control)
+        // double check_interval = this->get_parameter("waveform_file_check_interval").as_double();
+        // timer_ = this->create_wall_timer(
+        //     std::chrono::duration<double>(check_interval),
+        //     std::bind(&YAMNetClassifier::check_for_waveform, this)
+        // );
         
         RCLCPP_INFO(this->get_logger(), "========================================");
         RCLCPP_INFO(this->get_logger(), "YAMNet Classifier: %s", model_name_.c_str());
@@ -144,6 +151,66 @@ private:
         
         // For now, this is a placeholder - you could implement file monitoring
         // or use a service/topic-based approach instead
+    }
+    
+    void handle_classify_request(
+        const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+        std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+    {
+        (void)request;
+        
+        // Find the most recent waveform file
+        std::string latest_file = find_latest_waveform_file();
+        
+        if (latest_file.empty()) {
+            response->success = false;
+            response->message = "No waveform file found in /tmp/";
+            RCLCPP_WARN(this->get_logger(), "No waveform file found for classification");
+            return;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Classifying: %s", latest_file.c_str());
+        
+        try {
+            classify_waveform(latest_file);
+            response->success = true;
+            response->message = "Classification complete for " + latest_file;
+        } catch (const std::exception& e) {
+            response->success = false;
+            response->message = std::string("Classification failed: ") + e.what();
+            RCLCPP_ERROR(this->get_logger(), "Classification error: %s", e.what());
+        }
+    }
+    
+    std::string find_latest_waveform_file()
+    {
+        namespace fs = std::filesystem;
+        std::string latest_file;
+        std::filesystem::file_time_type latest_time;
+        bool found = false;
+        
+        try {
+            for (const auto& entry : fs::directory_iterator("/tmp")) {
+                if (entry.is_regular_file()) {
+                    std::string filename = entry.path().filename().string();
+                    // Check if starts with "waveform_" and ends with ".csv"
+                    bool is_csv = filename.size() >= 4 && 
+                                  filename.substr(filename.size() - 4) == ".csv";
+                    if (filename.find("waveform_") == 0 && is_csv) {
+                        auto ftime = fs::last_write_time(entry);
+                        if (!found || ftime > latest_time) {
+                            latest_time = ftime;
+                            latest_file = entry.path().string();
+                            found = true;
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Error searching for waveform files: %s", e.what());
+        }
+        
+        return latest_file;
     }
     
     std::vector<float> load_waveform_from_csv(const std::string& filename)
@@ -494,6 +561,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr classification_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr paint_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr classify_service_;
 };
 
 int main(int argc, char** argv)
