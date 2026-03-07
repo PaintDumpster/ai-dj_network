@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI DJ - Futuristic Audio Classification</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Background Spectrum Visualization -->
+        <div id="spectrum-background" class="spectrum-background">
+            <canvas id="spectrum-canvas"></canvas>
+        </div>
+
+        <!-- Stage 1: Welcome Screen -->
+        <div id="screen-welcome" class="screen active">
+            <div class="welcome-container">
+                <div class="welcome-header">
+                    <h1 class="title-futuristic">AI DJ</h1>
+                    <div class="welcome-divider"></div>
+                </div>
+                <div class="welcome-content">
+                    <p class="welcome-subtitle">PRESS TO START</p>
+                    <div class="welcome-instruction">
+                        <span class="pulse-text">awaiting input...</span>
+                    </div>
+                </div>
+                <div class="connection-status-welcome">
+                    <span id="connection-status" class="status-dot"></span>
+                    <span id="connection-text">Connecting...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 2: Countdown Screen (Overlay) -->
+        <div id="screen-countdown" class="screen countdown-overlay">
+            <div class="countdown-container">
+                <h1 class="countdown-number" id="countdown-display">3</h1>
+            </div>
+        </div>
+
+        <!-- Stage 3: Recording Screen -->
+        <div id="screen-recording" class="screen">
+            <div class="recording-container">
+                <div class="recording-header">
+                    <div class="recording-title">
+                        <span class="recording-dot"></span>
+                        <span class="recording-text">RECORDING</span>
+                    </div>
+                    <div class="recording-timer">
+                        <span id="recording-timer">00:00</span>
+                    </div>
+                </div>
+                
+                <!-- Vertical Spectrum Bar -->
+                <div class="spectrum-container">
+                    <canvas id="spectrum-bars-canvas"></canvas>
+                    <div class="spectrum-legend">
+                        <span class="spectrum-label">AUDIO LEVEL</span>
+                    </div>
+                </div>
+
+                <!-- Button Activity Grid -->
+                <div class="button-activity-recording">
+                    <div class="activity-buttons">
+                        <div class="btn-indicator" data-btn="1">1</div>
+                        <div class="btn-indicator" data-btn="2">2</div>
+                        <div class="btn-indicator" data-btn="3">3</div>
+                        <div class="btn-indicator" data-btn="4">4</div>
+                        <div class="btn-indicator" data-btn="5">5</div>
+                        <div class="btn-indicator" data-btn="6">6</div>
+                        <div class="btn-indicator" data-btn="7">7</div>
+                        <div class="btn-indicator" data-btn="8">8</div>
+                        <div class="btn-indicator" data-btn="9">9</div>
+                        <div class="btn-indicator" data-btn="10">10</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Recording Complete Screen (State: recording_complete) -->
+        <div id="screen-complete" class="screen">
+            <div class="screen-content">
+                <h1 class="title">✅ Recording Complete!</h1>
+                <p class="subtitle">Press <strong>Button 11</strong> to analyze</p>
+                <div class="recording-summary">
+                    <p><strong>Duration:</strong> 30 seconds</p>
+                    <p><strong>Button Presses:</strong> <span id="press-count">0</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 4: Analysis Screen with Glitch Effect -->
+        <div id="screen-analyzing" class="screen">
+            <div class="analyzing-container">
+                <div class="glitch-text" data-text="ANALYZING">ANALYZING</div>
+                <div class="scanning-effect"></div>
+                <p class="analyzing-subtitle">Processing audio classification...</p>
+            </div>
+        </div>
+
+        <!-- Stage 5: Results Screen with Split Layout -->
+        <div id="screen-results" class="screen">
+            <div class="results-container">
+                <!-- Left: Map Visualization -->
+                <div class="results-left">
+                    <div class="map-container">
+                        <canvas id="map-canvas"></canvas>
+                        <div class="map-label">AUDIO MAP</div>
+                    </div>
+                </div>
+
+                <!-- Right: Classification Results -->
+                <div class="results-right">
+                    <div class="results-header">
+                        <h2>CLASSIFICATION DATA</h2>
+                    </div>
+                    <div class="models-results-grid">
+                        <div class="model-card model-1">
+                            <h3>MODEL 1</h3>
+                            <div id="results-model1" class="results-list"></div>
+                        </div>
+                        <div class="model-card model-2">
+                            <h3>MODEL 2</h3>
+                            <div id="results-model2" class="results-list"></div>
+                        </div>
+                        <div class="model-card model-3">
+                            <h3>MODEL 3</h3>
+                            <div id="results-model3" class="results-list"></div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button onclick="restartApp()" class="btn-restart">NEW RECORDING</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
