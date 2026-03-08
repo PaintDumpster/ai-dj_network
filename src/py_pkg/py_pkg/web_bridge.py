@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import String, UInt8MultiArray
 from std_srvs.srv import Trigger
 import asyncio
 import uvicorn
@@ -12,6 +12,7 @@ import threading
 import json
 from typing import List
 import os
+import base64
 
 app = FastAPI(title="ROS2 Web Bridge")
 
@@ -45,6 +46,24 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Global event loop for async operations
+event_loop = None
+
+@app.on_event("startup")
+async def capture_event_loop():
+    """Capture the running event loop when FastAPI starts"""
+    global event_loop
+    event_loop = asyncio.get_running_loop()
+    print(f"Event loop captured: {event_loop}")
+
+def schedule_broadcast(data):
+    """Thread-safe way to schedule broadcast on event loop"""
+    if event_loop and manager.active_connections:
+        try:
+            asyncio.run_coroutine_threadsafe(manager.broadcast(data), event_loop)
+        except Exception as e:
+            print(f"Broadcast error: {e}")
+
 
 class WebBridgeNode(Node):
     def __init__(self):
@@ -54,6 +73,10 @@ class WebBridgeNode(Node):
         self.state = "welcome"  # States: welcome, ready, recording, analyzing, results
         self.recording_start_time = None
         self.waveform_file = None
+        
+        # Timer references for one-shot timers
+        self.countdown_timer = None
+        self.recording_timer = None
         
         # Store latest data
         self.arduino_data = []
@@ -81,10 +104,10 @@ class WebBridgeNode(Node):
             10
         )
         
-        # Subscribe to LED matrix updates
+        # Subscribe to LED matrix updates (42x146 grayscale waveform)
         self.led_matrix_sub = self.create_subscription(
-            String,
-            'led_matrix_status',  # You may need to add this publisher to build_waveform
+            UInt8MultiArray,
+            'led_matrix',
             self.led_matrix_callback,
             10
         )
@@ -126,20 +149,27 @@ class WebBridgeNode(Node):
         """Handle button 11 press for state transitions"""
         self.get_logger().info(f'State control pressed. Current state: {self.state}')
         
-        if self.state == "welcome":
-            self.state = "ready"
-            self.broadcast_state_change()
-        elif self.state == "ready":
+        if self.state == "welcome" or self.state == "ready":
+            # Single press starts countdown immediately
             self.state = "countdown"
             self.broadcast_state_change()
-            # Start countdown timer (3 seconds)
-            self.create_timer(3.0, self.start_recording)
+            # Start countdown timer (3 seconds) - one-shot
+            if self.countdown_timer:
+                self.countdown_timer.cancel()
+            self.countdown_timer = self.create_timer(3.0, self._countdown_complete)
         elif self.state == "recording_complete":
             self.state = "analyzing"
             self.broadcast_state_change()
             # Trigger classification on all 3 YAMNet models
             self.trigger_classification()
         
+    def _countdown_complete(self):
+        """Called once after 3-second countdown - cancels timer immediately"""
+        if self.countdown_timer:
+            self.countdown_timer.cancel()
+            self.countdown_timer = None
+        self.start_recording()
+    
     def start_recording(self):
         """Called after countdown completes"""
         self.state = "recording"
@@ -149,8 +179,17 @@ class WebBridgeNode(Node):
         # Call service to start recording on build_waveform node
         self.call_start_recording_service()
         
-        # Start 30-second recording timer
-        self.create_timer(30.0, self.complete_recording)
+        # Start 30-second recording timer - one-shot
+        if self.recording_timer:
+            self.recording_timer.cancel()
+        self.recording_timer = self.create_timer(30.0, self._recording_complete)
+    
+    def _recording_complete(self):
+        """Called once after 30-second recording - cancels timer immediately"""
+        if self.recording_timer:
+            self.recording_timer.cancel()
+            self.recording_timer = None
+        self.complete_recording()
     
     def complete_recording(self):
         """Called after 30 seconds of recording"""
@@ -167,7 +206,7 @@ class WebBridgeNode(Node):
             "state": self.state,
             "timestamp": self.get_clock().now().to_msg().sec
         }
-        asyncio.run(manager.broadcast(data))
+        schedule_broadcast(data)
         self.get_logger().info(f'State changed to: {self.state}')
     
     def call_start_recording_service(self):
@@ -243,14 +282,24 @@ class WebBridgeNode(Node):
             self.get_logger().error(f'{model_name} service call failed: {e}')
     
     def led_matrix_callback(self, msg):
-        """Handle LED matrix updates"""
-        self.led_matrix_data = msg.data
+        """Handle LED matrix updates (42x146 grayscale waveform)"""
+        # Store raw matrix data
+        self.led_matrix_data = list(msg.data)
+        
+        # Parse matrix dimensions from layout field or use defaults
+        height = msg.layout.dim[0].size if msg.layout.dim else 42
+        width = msg.layout.dim[1].size if len(msg.layout.dim) > 1 else 146
+        
+        # Prepare data for web client
         data = {
             "type": "led_matrix",
-            "data": msg.data,
+            "width": width,
+            "height": height,
+            "data": self.led_matrix_data,  # Flattened array
             "timestamp": self.get_clock().now().to_msg().sec
         }
-        asyncio.run(manager.broadcast(data))
+        schedule_broadcast(data)
+        self.get_logger().info(f'LED matrix update: {len(self.led_matrix_data)} bytes')
     
     def arduino_callback(self, msg):
         """Handle Arduino button press data (buttons 1-10)"""
@@ -270,7 +319,7 @@ class WebBridgeNode(Node):
             self.arduino_data.pop(0)
         
         # Broadcast to all connected clients
-        asyncio.run(manager.broadcast(data))
+        schedule_broadcast(data)
         self.get_logger().info(f'Arduino data: {msg.data}')
     
     def classification_callback(self, msg, model_name):
@@ -288,7 +337,7 @@ class WebBridgeNode(Node):
             self.classification_results[model_name].pop(0)
         
         # Broadcast to all connected clients
-        asyncio.run(manager.broadcast(data))
+        schedule_broadcast(data)
         self.get_logger().info(f'Classification from {model_name}')
 
 
@@ -297,8 +346,8 @@ bridge_node = None
 
 
 # REST API Endpoints
-@app.get("/")
-async def root():
+@app.get("/api/status")
+async def api_root():
     return {"message": "ROS2 Web Bridge API", "status": "running"}
 
 
@@ -356,9 +405,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # Serve static files (webapp folder)
-webapp_path = os.path.expanduser("~/rosnetwork/webapp")
-if os.path.exists(webapp_path):
-    app.mount("/app", StaticFiles(directory=webapp_path, html=True), name="webapp")
+# Try multiple possible paths
+webapp_paths = [
+    os.path.expanduser("~/iaac/ai4all/rosnetwork/webapp"),
+    "/home/salva/iaac/ai4all/rosnetwork/webapp",
+    os.path.join(os.path.dirname(__file__), "../../../webapp"),
+]
+
+for webapp_path in webapp_paths:
+    if os.path.exists(webapp_path):
+        # Mount static files at root for direct access to index.html, css/, js/, etc.
+        app.mount("/", StaticFiles(directory=webapp_path, html=True), name="webapp")
+        print(f"Serving webapp from: {webapp_path}")
+        break
+else:
+    print("Warning: webapp directory not found!")
 
 
 def run_ros_node():
@@ -376,7 +437,8 @@ def main():
     ros_thread = threading.Thread(target=run_ros_node, daemon=True)
     ros_thread.start()
     
-    # Start FastAPI server
+    # Start FastAPI server (uvicorn creates its own event loop)
+    # The event loop will be captured in the startup event handler
     uvicorn.run(
         app,
         host="0.0.0.0",

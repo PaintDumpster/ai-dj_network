@@ -1,0 +1,34 @@
+{
+  "name": "ai-dj-webapp",
+  "version": "1.0.0",
+  "description": "Real-time web visualization for AI DJ audio classification system",
+  "main": "index.html",
+  "scripts": {
+    "dev": "python3 -m http.server 8080",
+    "serve": "echo 'Run: ros2 run py_pkg web_bridge' && echo 'Then open: http://localhost:8000'"
+  },
+  "keywords": [
+    "ros2",
+    "audio",
+    "classification",
+    "yamnet",
+    "websocket",
+    "visualization",
+    "led-matrix"
+  ],
+  "author": "AI4All Team",
+  "license": "MIT",
+  "devDependencies": {},
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/rosnetwork"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/rosnetwork/issues"
+  },
+  "homepage": "https://github.com/yourusername/rosnetwork#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

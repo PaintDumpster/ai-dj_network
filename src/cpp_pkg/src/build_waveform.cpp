@@ -41,11 +41,9 @@ public:
             std::bind(&WaveformBuilder::arduino_callback, this, std::placeholders::_1)
         );
         
-        // Subscribe to state control (button 11)
-        state_control_subscription_ = this->create_subscription<std_msgs::msg::String>(
-            "state_control", 10,
-            std::bind(&WaveformBuilder::state_control_callback, this, std::placeholders::_1)
-        );
+        // NOTE: Button 11 (state_control) is now handled by web_bridge node
+        // build_waveform only responds to service calls (start_recording/stop_recording)
+        // state_control_subscription_ commented out to avoid conflicts with webapp state machine
         
         // Publisher for LED matrix data
         matrix_publisher_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("led_matrix", 10);
@@ -97,15 +95,10 @@ private:
     
     void state_control_callback(const std_msgs::msg::String::SharedPtr msg)
     {
-        (void)msg;  // Unused parameter - we just toggle on button press
-        // Button 11 toggles recording on/off
-        if (!recording_active_) {
-            start_recording();
-            RCLCPP_INFO(this->get_logger(), "Recording started by button 11");
-        } else {
-            stop_recording();
-            RCLCPP_INFO(this->get_logger(), "Recording stopped by button 11");
-        }
+        // DISABLED: web_bridge now handles button 11 state control
+        // This node only responds to service calls
+        (void)msg;
+        return;
     }
     
     void arduino_callback(const std_msgs::msg::String::SharedPtr msg)

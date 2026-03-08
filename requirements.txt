@@ -1,0 +1,30 @@
+# Python Requirements for AI DJ Web Interface
+# 
+# RECOMMENDED: Use rosdep to install dependencies (see ROSDEP_SETUP.md)
+#   cd ~/iaac/ai4all/rosnetwork
+#   rosdep install --from-paths src --ignore-src -y
+#
+# ALTERNATIVE: Manual installation with pip
+#   pip3 install -r requirements.txt
+#
+# Note: Dependencies are declared in src/py_pkg/package.xml
+#       and resolved via rosdep.yaml
+
+# Web Framework & Server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+
+# For YAMNet model conversion (optional - only if converting models)
+# These are NOT managed by rosdep - install manually if needed
+tensorflow>=2.13.0
+tf2onnx>=1.15.0
+tensorflow-hub>=0.14.0
+
+# CORS support (included in fastapi, but listed for clarity)
+python-multipart>=0.0.6
+
+# ROS2 Python packages (installed with ROS2, not via pip)
+# - rclpy
+# - std_msgs
+# - std_srvs

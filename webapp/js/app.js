@@ -222,7 +222,11 @@ function connectWebSocket() {
             // Request current state
             fetch('/api/state')
                 .then(r => r.json())
-                .then(data => changeState(data.state));
+                .then(data => {
+                    console.log('Initial state from server:', data);
+                    changeState(data.state);
+                })
+                .catch(err => console.error('Failed to fetch initial state:', err));
         };
         
         ws.onmessage = (event) => {
@@ -273,6 +277,7 @@ function handleStateChange(data) {
 }
 
 function changeState(newState) {
+    console.log(`Changing state from '${currentState}' to '${newState}'`);
     currentState = newState;
     
     // Hide all screens
@@ -282,29 +287,40 @@ function changeState(newState) {
     switch (newState) {
         case 'welcome':
             document.getElementById('screen-welcome').classList.add('active');
+            console.log('Displaying welcome screen');
             break;
         case 'ready':
+            // Keep showing welcome screen - user just pressed button, waiting for ROS2 response
             document.getElementById('screen-welcome').classList.add('active');
+            console.log('State is ready, showing welcome screen');
             break;
         case 'countdown':
             document.getElementById('screen-countdown').classList.add('active');
             startCountdown();
+            console.log('Starting countdown');
             break;
         case 'recording':
             document.getElementById('screen-recording').classList.add('active');
             startRecordingDisplay();
+            console.log('Starting recording display');
             break;
         case 'recording_complete':
             document.getElementById('screen-complete').classList.add('active');
             document.getElementById('press-count').textContent = buttonPresses.length;
+            console.log('Recording complete, showing summary');
             break;
         case 'analyzing':
             document.getElementById('screen-analyzing').classList.add('active');
+            console.log('Analyzing...');
             break;
         case 'results':
             document.getElementById('screen-results').classList.add('active');
             drawMapVisualization();
+            console.log('Displaying results');
             break;
+        default:
+            console.error(`Unknown state: ${newState}`);
+            document.getElementById('screen-welcome').classList.add('active');
     }
 }
 
@@ -330,7 +346,14 @@ function startRecordingDisplay() {
     recordingStartTime = Date.now();
     buttonPresses = [];
     
-    // Update timer every 100ms
+    // Initialize LED canvas if not already done
+    if (!ledCanvas) {
+        initializeLEDCanvas();
+    } else {
+        clearLEDMatrix();
+    }
+    
+    // Update timer every 1 second
     recordingTimer = setInterval(() => {
         const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
@@ -338,14 +361,13 @@ function startRecordingDisplay() {
         document.getElementById('recording-timer').textContent = 
             `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         
-        // Draw spectrum during recording
-        drawRecordingSpectrum();
+        // Spectrum animation removed - it was causing jitter and visual bugs
         
         // Stop at 30 seconds
         if (elapsed >= 30) {
             clearInterval(recordingTimer);
         }
-    }, 100);
+    }, 1000);
 }
 
 // Arduino Button Press Handler
@@ -408,10 +430,57 @@ function clearLEDMatrix() {
 function handleLEDMatrixUpdate(data) {
     if (!ledCtx) return;
     
-    // Parse LED matrix data and update display
-    // Data format would come from ROS2 node
-    // For now, this is a placeholder
-    console.log('LED matrix update received');
+    // Parse LED matrix data from ROS2 (flattened UInt8Array)
+    // Data format: { width, height, data: [flattenedArray] }
+    const width = data.width || MATRIX_WIDTH;
+    const height = data.height || MATRIX_HEIGHT;
+    const matrixData = data.data;
+    
+    if (!matrixData || matrixData.length !== width * height) {
+        console.log('Invalid matrix data received');
+        return;
+    }
+    
+    console.log(`LED matrix update received: ${width}x${height}`);
+    
+    // Update the display
+    drawLEDMatrixWaveform(matrixData, width, height);
+}
+
+function drawLEDMatrixWaveform(matrixData, width, height) {
+    if (!ledCtx) return;
+    
+    const pixelWidth = ledCanvas.width / width;
+    const pixelHeight = ledCanvas.height / height;
+    
+    // Clear canvas
+    ledCtx.fillStyle = '#0a0a0a';
+    ledCtx.fillRect(0, 0, ledCanvas.width, ledCanvas.height);
+    
+    // Draw waveform pixels
+    for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+            const index = row * width + col;
+            const value = matrixData[index];
+            
+            if (value > 0) {
+                const x = col * pixelWidth;
+                const y = row * pixelHeight;
+                
+                // White grayscale for waveform
+                ledCtx.fillStyle = `rgb(${value}, ${value}, ${value})`;
+                ledCtx.fillRect(x, y, pixelWidth, pixelHeight);
+                
+                // Add slight glow for active pixels
+                if (value > 200) {
+                    ledCtx.shadowColor = `rgba(255, 255, 255, 0.5)`;
+                    ledCtx.shadowBlur = 2;
+                    ledCtx.fillRect(x, y, pixelWidth, pixelHeight);
+                    ledCtx.shadowBlur = 0;
+                }
+            }
+        }
+    }
 }
 
 function updateLEDMatrix(matrixData) {

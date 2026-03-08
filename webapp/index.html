@@ -3,91 +3,90 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI DJ - Audio Classification System</title>
-    <link rel="stylesheet" href="style.css">
+    <title>AI DJ - Futuristic Audio Classification</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="app">
-        <!-- Welcome Screen (State: welcome) -->
+        <!-- Background Spectrum Visualization -->
+        <div id="spectrum-background" class="spectrum-background">
+            <canvas id="spectrum-canvas"></canvas>
+        </div>
+
+        <!-- Stage 1: Welcome Screen -->
         <div id="screen-welcome" class="screen active">
-            <div class="screen-content">
-                <h1 class="title">🎵 AI DJ</h1>
-                <p class="subtitle">Audio Classification & LED Visualization System</p>
-                <div class="instructions">
-                    <p>Welcome! Press <strong>Button 11</strong> to begin</p>
+            <div class="welcome-container">
+                <div class="welcome-header">
+                    <h1 class="title-futuristic">AI DJ</h1>
+                    <div class="welcome-divider"></div>
                 </div>
-                <div class="status-indicator">
+                <div class="welcome-content">
+                    <p class="welcome-subtitle">PRESS TO START</p>
+                    <div class="welcome-instruction">
+                        <span class="pulse-text">awaiting input...</span>
+                    </div>
+                </div>
+                <div class="connection-status-welcome">
                     <span id="connection-status" class="status-dot"></span>
                     <span id="connection-text">Connecting...</span>
                 </div>
             </div>
         </div>
 
-        <!-- Ready Screen (State: ready) -->
-        <div id="screen-ready" class="screen">
-            <div class="screen-content">
-                <h1 class="title">Ready to Create</h1>
-                <p class="subtitle">Press <strong>Button 11</strong> to start recording</p>
-                <div class="button-grid-display">
-                    <div class="button-showcase">
-                        <div class="showcase-buttons">
-                            <div class="button-item">1</div>
-                            <div class="button-item">2</div>
-                            <div class="button-item">3</div>
-                            <div class="button-item">4</div>
-                            <div class="button-item">5</div>
-                        </div>
-                        <div class="showcase-buttons">
-                            <div class="button-item">6</div>
-                            <div class="button-item">7</div>
-                            <div class="button-item">8</div>
-                            <div class="button-item">9</div>
-                            <div class="button-item">10</div>
-                        </div>
-                    </div>
-                    <p class="hint">Use buttons 1-10 to create your audio composition</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Countdown Screen (State: countdown) -->
-        <div id="screen-countdown" class="screen">
-            <div class="screen-content centered">
+        <!-- Stage 2: Countdown Screen (Overlay) -->
+        <div id="screen-countdown" class="screen countdown-overlay">
+            <div class="countdown-container">
                 <h1 class="countdown-number" id="countdown-display">3</h1>
-                <p class="subtitle">Get ready! Recording starts in...</p>
             </div>
         </div>
 
-        <!-- Recording Screen (State: recording) -->
+        <!-- Stage 3: Recording Screen -->
         <div id="screen-recording" class="screen">
-            <div class="screen-header">
-                <h2>🔴 Recording in Progress</h2>
-                <div class="timer-display">
-                    <span id="recording-timer">00:00</span>
-                    <span class="timer-total">/ 00:30</span>
+            <div class="recording-container">
+                <div class="recording-header">
+                    <div class="recording-title">
+                        <span class="recording-dot"></span>
+                        <span class="recording-text">RECORDING</span>
+                    </div>
+                    <div class="recording-timer">
+                        <span id="recording-timer">00:00</span>
+                    </div>
                 </div>
-            </div>
-            <div class="led-matrix-container">
-                <canvas id="led-matrix-canvas"></canvas>
-                <div class="matrix-info">
-                    <span>Press buttons 1-10 to add sounds</span>
+                
+                <!-- Vertical Spectrum Bar -->
+                <div class="spectrum-container">
+                    <canvas id="spectrum-bars-canvas"></canvas>
+                    <div class="spectrum-legend">
+                        <span class="spectrum-label">AUDIO LEVEL</span>
+                    </div>
                 </div>
-            </div>
-            <div class="button-activity">
-                <div class="activity-buttons">
-                    <div class="btn-indicator" data-btn="1">1</div>
-                    <div class="btn-indicator" data-btn="2">2</div>
-                    <div class="btn-indicator" data-btn="3">3</div>
-                    <div class="btn-indicator" data-btn="4">4</div>
-                    <div class="btn-indicator" data-btn="5">5</div>
-                    <div class="btn-indicator" data-btn="6">6</div>
-                    <div class="btn-indicator" data-btn="7">7</div>
-                    <div class="btn-indicator" data-btn="8">8</div>
-                    <div class="btn-indicator" data-btn="9">9</div>
-                    <div class="btn-indicator" data-btn="10">10</div>
+
+                <!-- LED Matrix Waveform Visualization -->
+                <div class="waveform-container">
+                    <canvas id="led-matrix-canvas"></canvas>
+                    <div class="waveform-legend">
+                        <span class="waveform-label">WAVEFORM (30s)</span>
+                    </div>
+                </div>
+
+                <!-- Button Activity Grid -->
+                <div class="button-activity-recording">
+                    <div class="activity-buttons">
+                        <div class="btn-indicator" data-btn="1">1</div>
+                        <div class="btn-indicator" data-btn="2">2</div>
+                        <div class="btn-indicator" data-btn="3">3</div>
+                        <div class="btn-indicator" data-btn="4">4</div>
+                        <div class="btn-indicator" data-btn="5">5</div>
+                        <div class="btn-indicator" data-btn="6">6</div>
+                        <div class="btn-indicator" data-btn="7">7</div>
+                        <div class="btn-indicator" data-btn="8">8</div>
+                        <div class="btn-indicator" data-btn="9">9</div>
+                        <div class="btn-indicator" data-btn="10">10</div>
+                    </div>
                 </div>
             </div>
         </div>
+
 
         <!-- Recording Complete Screen (State: recording_complete) -->
         <div id="screen-complete" class="screen">
@@ -101,48 +100,53 @@
             </div>
         </div>
 
-        <!-- Analyzing Screen (State: analyzing) -->
+        <!-- Stage 4: Analysis Screen with Glitch Effect -->
         <div id="screen-analyzing" class="screen">
-            <div class="screen-content centered">
-                <h1 class="title">🤖 Analyzing Audio...</h1>
-                <div class="spinner"></div>
-                <p class="subtitle">Running 3 YAMNet models</p>
+            <div class="analyzing-container">
+                <div class="glitch-text" data-text="ANALYZING">ANALYZING</div>
+                <div class="scanning-effect"></div>
+                <p class="analyzing-subtitle">Processing audio classification...</p>
             </div>
         </div>
 
-        <!-- Results Screen (State: results) -->
+        <!-- Stage 5: Results Screen with Split Layout -->
         <div id="screen-results" class="screen">
-            <div class="screen-header">
-                <h2>🎯 Classification Results</h2>
-            </div>
-            <div class="led-matrix-container">
-                <canvas id="led-matrix-results"></canvas>
-                <div class="matrix-legend">
-                    <span class="legend-item"><span class="color-box red"></span> Model 1 (Red)</span>
-                    <span class="legend-item"><span class="color-box green"></span> Model 2 (Green)</span>
-                    <span class="legend-item"><span class="color-box blue"></span> Model 3 (Blue)</span>
+            <div class="results-container">
+                <!-- Left: Map Visualization -->
+                <div class="results-left">
+                    <div class="map-container">
+                        <canvas id="map-canvas"></canvas>
+                        <div class="map-label">AUDIO MAP</div>
+                    </div>
                 </div>
-            </div>
-            <div class="models-results-grid">
-                <div class="model-card red-theme">
-                    <h3>Model 1 - Original</h3>
-                    <div id="results-model1" class="results-list"></div>
+
+                <!-- Right: Classification Results -->
+                <div class="results-right">
+                    <div class="results-header">
+                        <h2>CLASSIFICATION DATA</h2>
+                    </div>
+                    <div class="models-results-grid">
+                        <div class="model-card model-1">
+                            <h3>MODEL 1</h3>
+                            <div id="results-model1" class="results-list"></div>
+                        </div>
+                        <div class="model-card model-2">
+                            <h3>MODEL 2</h3>
+                            <div id="results-model2" class="results-list"></div>
+                        </div>
+                        <div class="model-card model-3">
+                            <h3>MODEL 3</h3>
+                            <div id="results-model3" class="results-list"></div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button onclick="restartApp()" class="btn-restart">NEW RECORDING</button>
+                    </div>
                 </div>
-                <div class="model-card green-theme">
-                    <h3>Model 2 - Dataset A</h3>
-                    <div id="results-model2" class="results-list"></div>
-                </div>
-                <div class="model-card blue-theme">
-                    <h3>Model 3 - Dataset B</h3>
-                    <div id="results-model3" class="results-list"></div>
-                </div>
-            </div>
-            <div class="actions">
-                <button onclick="restartApp()" class="btn-primary">Start New Recording</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>
