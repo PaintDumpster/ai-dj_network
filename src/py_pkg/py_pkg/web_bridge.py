@@ -390,6 +390,44 @@ async def get_model_classifications(model_name: str):
     return {"data": []}
 
 
+@app.get("/api/sounds")
+async def get_sound_files():
+    """Get available sound files for each button/district"""
+    sounds_mapping = {}
+    
+    # Find sounds directory
+    sounds_paths = [
+        os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
+        "/home/salva/iaac/ai4all/rosnetwork/sounds",
+        os.path.join(os.path.dirname(__file__), "../../../sounds"),
+    ]
+    
+    sounds_base = None
+    for path in sounds_paths:
+        if os.path.exists(path):
+            sounds_base = path
+            break
+    
+    if sounds_base:
+        # Scan subdirectories for WAV files
+        # Directories are named like "1. Ciutat Vella", "2. Eixample", etc.
+        for button_num in range(1, 11):
+            # Look for directory starting with button number
+            button_dirs = [d for d in os.listdir(sounds_base) 
+                          if d.startswith(f"{button_num}. ") and os.path.isdir(os.path.join(sounds_base, d))]
+            
+            if button_dirs:
+                subdir = os.path.join(sounds_base, button_dirs[0])
+                wav_files = [f for f in os.listdir(subdir) if f.endswith('.wav')]
+                # Use URL-encoded path for directory with spaces
+                dir_name = button_dirs[0].replace(' ', '%20')
+                sounds_mapping[str(button_num)] = [
+                    f"/sounds/{dir_name}/{f.replace(' ', '%20')}" for f in wav_files
+                ]
+    
+    return {"sounds": sounds_mapping}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates"""
@@ -403,6 +441,21 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+
+# Serve static files (sounds folder first)
+sounds_paths = [
+    os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
+    "/home/salva/iaac/ai4all/rosnetwork/sounds",
+    os.path.join(os.path.dirname(__file__), "../../../sounds"),
+]
+
+for sounds_path in sounds_paths:
+    if os.path.exists(sounds_path):
+        app.mount("/sounds", StaticFiles(directory=sounds_path), name="sounds")
+        print(f"Serving sounds from: {sounds_path}")
+        break
+else:
+    print("Warning: sounds directory not found!")
 
 # Serve static files (webapp folder)
 # Try multiple possible paths

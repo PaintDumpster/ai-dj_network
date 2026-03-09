@@ -1,14 +1,39 @@
 # AI DJ Web Application
 
-Real-time web visualization interface for the AI DJ audio classification system.
+Real-time web visualization interface for the AI DJ audio classification system with integrated Barcelona district sound playback.
 
 ## 🎨 Overview
 
 A futuristic dark-themed web application that provides real-time visualization of:
 - Live audio waveform (42×146 LED matrix)
-- Button press indicators (1-10)
+- Button press indicators (1-10) with visual feedback
+- **Barcelona district audio playback** (HTML5 Audio)
 - State machine transitions
 - Audio classification results from 3 YAMNet models
+
+## ✨ Features
+
+### Visual
+- **Real-time waveform display**: 42×146 pixel LED matrix canvas
+- **Button indicators**: Visual feedback when buttons 1-10 are pressed
+- **State transitions**: Smooth animated transitions between screens
+- **Futuristic design**: Dark neon theme with glitch effects
+- **Responsive layout**: Works on desktop and mobile
+
+### Audio **NEW** ✅
+- **Barcelona sound playback**: Plays district sounds in browser when buttons pressed
+- **Random selection**: Each button randomly selects from 5 district sounds
+- **HTML5 Audio API**: No plugins required, works in all modern browsers
+- **Auto-enable**: User click activates audio (browser autoplay policy)
+- **Volume control**: Set to 70% by default
+- **Debug logging**: Emoji-marked console logs for troubleshooting
+
+### Data
+- **WebSocket connection**: Real-time updates from ROS2 system
+- **Sound mapping API**: Fetches available sounds from `/api/sounds`
+- **LED matrix data**: Receives 6,132-byte updates at 10 Hz
+- **Button events**: Instant notification of hardware button presses
+- **State synchronization**: Backend state machine controls UI flow
 
 ## 📁 Project Structure
 
@@ -45,9 +70,90 @@ webapp/
    http://localhost:8000
    ```
 
+3. **Enable audio**: Click anywhere on the page to enable sound playback (browser requirement)
+
+4. **Start recording**: Press button 11 (or click welcome screen)
+
+5. **Press buttons 1-10**: Hear Barcelona district sounds and see waveform build!
+
 ### Development
 
 The webapp is served directly by the FastAPI server in `web_bridge.py`. No build process required - just edit and refresh!
+
+**Note**: After editing JavaScript files, do a hard refresh in browser:
+- **Windows/Linux**: Ctrl+Shift+R or Ctrl+F5
+- **Mac**: Cmd+Shift+R
+
+## 🎵 Barcelona District Sounds
+
+The webapp plays authentic Barcelona district sounds when buttons are pressed:
+
+| Button | District | Example Sounds |
+|--------|----------|----------------|
+| 1 | Ciutat Vella | Castellers, Sardanes, Gothic Quarter |
+| 2 | Eixample | Sant Jordi, Modernist tours |
+| 3 | Sants-Montjuïc | Montjuïc parks, festivals |
+| 4 | Les Corts | Camp Nou, university area |
+| 5 | Sarrià-St Gervasi | Upscale areas, parks |
+| 6 | Gràcia | Festa Major, bohemian streets |
+| 7 | Horta-Guinardó | Parks, residential areas |
+| 8 | Nou Barris | Working-class neighborhoods |
+| 9 | Sant Andreu | Traditional markets |
+| 10 | Sant Martí | Beach, 22@ tech district |
+
+Each button has **5 different sounds** that are randomly selected on each press.
+
+## 🔧 Audio System Details
+
+### How It Works
+
+1. **Page Load**: 
+   - Webapp fetches sound mappings from `/api/sounds` endpoint
+   - Sound paths are stored in `soundsMapping` object
+   - Console shows: `✅ Sound mappings loaded: 10 buttons`
+
+2. **User Interaction**:
+   - First click enables audio playback (browser requirement)
+   - Console shows: `🔊 Audio enabled by user interaction`
+
+3. **Button Press** (during recording):
+   - Hardware button press → ROS2 → WebSocket → Browser
+   - `playRandomSound(buttonNumber)` function called
+   - Random sound selected from button's district
+   - HTML5 Audio element created and played
+   - Console shows:
+     ```
+     🔘 Arduino button press: {button: "1"}
+     🎵 playRandomSound called for button 1
+     🎧 Playing: /sounds/1.%20Ciutat%20Vella/castellers.wav
+     ✅ Audio loaded successfully
+     ▶️ Audio playing
+     ```
+
+### Browser Compatibility
+
+- ✅ Chrome/Edge (recommended)
+- ✅ Firefox
+- ✅ Safari
+- ✅ Mobile browsers
+
+### Troubleshooting
+
+**No sound playing?**
+1. Open browser console (F12)
+2. Look for error messages starting with ❌
+3. Check if you clicked the page to enable audio (look for 🔊 message)
+4. Verify sound files exist: `curl http://localhost:8000/api/sounds`
+5. Test manual playback: Click anywhere, watch console logs
+
+**Console shows "Audio might be blocked"?**
+- Click anywhere on the page before/during recording
+- Browser autoplay policy requires user gesture
+
+**Sound files not found (404)?**
+- Check `sounds/` directory has WAV files
+- Restart `web_bridge` node
+- Verify `/api/sounds` returns file paths
 
 ## 🎯 Features
 
@@ -71,7 +177,57 @@ The webapp is served directly by the FastAPI server in `web_bridge.py`. No build
 - **Button Grid**: 10 button indicators with active states
 - **Neon Effects**: Glowing borders, shadows, and text effects
 
-## 🔌 WebSocket API
+## � API Endpoints
+
+### REST API
+
+**GET `/api/state`** - Get current system state
+```json
+{
+  "state": "recording",
+  "recording_active": true
+}
+```
+
+**GET `/api/sounds`** - Get available sound files per button
+```json
+{
+  "sounds": {
+    "1": [
+      "/sounds/1.%20Ciutat%20Vella/castellers-sant-jaume.wav",
+      "/sounds/1.%20Ciutat%20Vella/sardanes-catedral.wav",
+      ...
+    ],
+    "2": [...],
+    ...
+  }
+}
+```
+
+**GET `/api/arduino/latest`** - Get recent button presses
+```json
+{
+  "data": [
+    {"type": "arduino", "button": "1", "timestamp": 123456},
+    ...
+  ]
+}
+```
+
+**GET `/api/classifications`** - Get all classification results
+```json
+{
+  "model1": ["Class A: 0.95", "Class B: 0.82", ...],
+  "model2": [...],
+  "model3": [...]
+}
+```
+
+**Static Files**:
+- `GET /sounds/{district}/{filename.wav}` - Direct audio file access
+- `GET /`, `/css/*`, `/js/*`, `/assets/*` - Webapp files
+
+## �🔌 WebSocket API
 
 ### Received Messages
 

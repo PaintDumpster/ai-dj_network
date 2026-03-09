@@ -10,6 +10,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SNDFILE REQUIRED sndfile)
 
 # Try to find ONNX Runtime (optional for yamnet_classification node)
 find_path(ONNXRUNTIME_INCLUDE_DIR 
@@ -56,10 +58,14 @@ target_link_libraries(writer PUBLIC
 
 # build_waveform node
 add_executable(build_waveform src/build_waveform.cpp)
+target_include_directories(build_waveform PUBLIC
+  ${SNDFILE_INCLUDE_DIRS}
+)
 target_link_libraries(build_waveform PUBLIC
   rclcpp::rclcpp
   ${std_msgs_TARGETS}
   ${std_srvs_TARGETS}
+  ${SNDFILE_LIBRARIES}
 )
 
 # yamnet_classification node (only if ONNX Runtime is available)

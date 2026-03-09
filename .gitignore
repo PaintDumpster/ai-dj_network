@@ -13,6 +13,8 @@ __pycache__/
 *.egg-info/
 dist/
 .eggs/
+.venv/
+venv/
 
 # C++
 *.o
@@ -45,6 +47,11 @@ Thumbs.db
 *.db3
 *.db3-shm
 *.db3-wal
+
+# Audio files
+*.wav
+*.mp3
+*.m4a
 
 # Ignore colcon generated files
 COLCON_IGNORE

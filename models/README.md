@@ -2,82 +2,114 @@
 
 This directory contains machine learning models for audio classification.
 
-## Required Files
+## Required Files - Fine-Tuned Multi-Model Setup
 
-### YAMNet Model Files
+This project uses **three fine-tuned YAMNet models**, each with unique class labels:
 
-1. **yamnet.onnx** - YAMNet model in ONNX format (~3-4 MB)
-2. **yamnet_class_names.txt** - List of 521 AudioSet class names
+### Model 1 (Red) - Fine-tuned specialist
+- **model1.onnx** - First fine-tuned model
+- **model1_classes.txt** - Model 1 output class labels
+
+### Model 2 (Green) - Fine-tuned specialist
+- **model2.onnx** - Second fine-tuned model
+- **model2_classes.txt** - Model 2 output class labels
+
+### Model 3 (Blue) - Fine-tuned specialist
+- **model3.onnx** - Third fine-tuned model
+- **model3_classes.txt** - Model 3 output class labels
 
 ## Setup Instructions
 
-Follow the [YAMNET_SETUP_GUIDE.md](../YAMNET_SETUP_GUIDE.md) to:
-1. Install ONNX Runtime
-2. Download and convert the YAMNet model
-3. Set up the classification node
+Place your six files in this directory:
+1. Copy your three `.onnx` model files → Rename to `model1.onnx`, `model2.onnx`, `model3.onnx`
+2. Copy your three class label `.txt` files → Rename to `model1_classes.txt`, `model2_classes.txt`, `model3_classes.txt`
 
-## Quick Setup
-
-```bash
-cd <workspace>/models
-
-# Install dependencies
-pip3 install tensorflow tf2onnx tensorflow-hub numpy
-
-# Download and convert YAMNet (see YAMNET_SETUP_GUIDE.md for the conversion script)
-python3 convert_yamnet.py
-```
+Ensure ONNX Runtime is installed (see main README.md for installation instructions).
 
 ## Model Information
 
-### YAMNet
-- **Source**: [TensorFlow Hub](https://tfhub.dev/google/yamnet/1)
-- **Purpose**: Audio event classification
+### Fine-Tuned YAMNet Models
+- **Base Architecture**: YAMNet (Google Research)
+- **Training**: Fine-tuned on custom datasets
+- **Purpose**: Specialized audio event classification
 - **Input**: 15,600 audio samples (0.975s at 16kHz)
-- **Output**: 521 class probabilities (AudioSet classes)
+- **Output**: Model-specific class probabilities (varies per model)
 - **Format**: ONNX
 
-### AudioSet Classes
+Each model has been trained on a unique dataset with its own set of output classes. The three models work in parallel to provide diverse audio classification perspectives, with results visualized in RGB colors on the LED matrix.
 
-YAMNet can classify 521 different sound categories including:
-- Music (instruments, genres, musical concepts)
-- Human sounds (speech, singing, laughter, etc.)
-- Animal sounds (dogs, cats, birds, etc.)
-- Environmental sounds (rain, wind, traffic, etc.)
-- Mechanical sounds (engines, tools, alarms, etc.)
-- And many more...
+### Class Labels Format
 
-Full class list is in `yamnet_class_names.txt` after setup.
+Each `*_classes.txt` file should have one class name per line:
+```
+class_name_1
+class_name_2
+class_name_3
+...
+```
+
+The line number corresponds to the output index from the model.
 
 ## Directory Structure
 
 ```
 models/
 ├── README.md                    # This file
-├── yamnet.onnx                  # YAMNet ONNX model (to be downloaded)
-├── yamnet_class_names.txt       # AudioSet class names (to be downloaded)
-└── convert_yamnet.py            # Conversion script (from setup guide)
+├── model1.onnx                  # Fine-tuned model 1 (Red channel)
+├── model1_classes.txt           # Model 1 class labels
+├── model2.onnx                  # Fine-tuned model 2 (Green channel)
+├── model2_classes.txt           # Model 2 class labels
+├── model3.onnx                  # Fine-tuned model 3 (Blue channel)
+└── model3_classes.txt           # Model 3 class labels
 ```
 
 ## Verification
 
-After setup, verify files exist:
+After placing your models, verify files exist:
 ```bash
+cd models/
 ls -lh
 # Should show:
-# yamnet.onnx (3-4 MB)
-# yamnet_class_names.txt (few KB)
+# model1.onnx (size varies)
+# model1_classes.txt
+# model2.onnx (size varies)
+# model2_classes.txt
+# model3.onnx (size varies)
+# model3_classes.txt
 ```
 
 ## Usage
 
-The `yamnet_classification` node automatically loads these files. Default paths:
-- Model: `<workspace>/models/yamnet.onnx`
-- Classes: `<workspace>/models/yamnet_class_names.txt`
+### Running Three Fine-Tuned Models
 
-Override with ROS parameters if needed:
+Each model instance needs its own ONNX file and class labels file:
+
 ```bash
+# Terminal 1: Model 1 (Red - 255,0,0)
 ros2 run cpp_pkg yamnet_classification --ros-args \
-  -p model_path:=/custom/path/yamnet.onnx \
-  -p class_names_path:=/custom/path/yamnet_class_names.txt
+  -p model_path:=/home/salva/iaac/ai4all/rosnetwork/models/model1.onnx \
+  -p class_names_path:=/home/salva/iaac/ai4all/rosnetwork/models/model1_classes.txt \
+  -p model_name:=Model_1_Red \
+  -p model_color_r:=255 -p model_color_g:=0 -p model_color_b:=0
+
+# Terminal 2: Model 2 (Green - 0,255,0)
+ros2 run cpp_pkg yamnet_classification --ros-args \
+  -p model_path:=/home/salva/iaac/ai4all/rosnetwork/models/model2.onnx \
+  -p class_names_path:=/home/salva/iaac/ai4all/rosnetwork/models/model2_classes.txt \
+  -p model_name:=Model_2_Green \
+  -p model_color_r:=0 -p model_color_g:=255 -p model_color_b:=0
+
+# Terminal 3: Model 3 (Blue - 0,0,255)
+ros2 run cpp_pkg yamnet_classification --ros-args \
+  -p model_path:=/home/salva/iaac/ai4all/rosnetwork/models/model3.onnx \
+  -p class_names_path:=/home/salva/iaac/ai4all/rosnetwork/models/model3_classes.txt \
+  -p model_name:=Model_3_Blue \
+  -p model_color_r:=0 -p model_color_g:=0 -p model_color_b:=255
+```
+
+### Using Launch File
+
+Or use the launch file (update paths in `src/cpp_pkg/launch/three_yamnet_models.launch.py`):
+```bash
+ros2 launch cpp_pkg three_yamnet_models.launch.py
 ```

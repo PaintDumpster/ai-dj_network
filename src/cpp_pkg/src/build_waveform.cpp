@@ -8,6 +8,8 @@
 #include <fstream>
 #include <filesystem>
 #include <cmath>
+#include <random>
+#include <sndfile.h>
 
 class WaveformBuilder : public rclcpp::Node
 {
@@ -22,7 +24,7 @@ public:
         led_matrix_.resize(matrix_height_ * matrix_width_, 0);
         
         // Declare parameters
-        this->declare_parameter("sounds_folder", std::string(std::getenv("HOME")) + "/rosnetwork/sounds");
+        this->declare_parameter("sounds_folder", std::string(std::getenv("HOME")) + "/iaac/ai4all/rosnetwork/sounds");
         this->declare_parameter("recording_duration", 30.0);
         this->declare_parameter("sample_rate", 44100);
         this->declare_parameter("matrix_update_rate", 0.1);  // Update LEDs every 100ms
@@ -77,20 +79,41 @@ public:
 private:
     void load_sound_mappings()
     {
-        // Map button numbers (1-10) to sound files
-        for (int i = 1; i <= 10; i++) {
-            std::string sound_file = sounds_folder_ + "/button_" + std::to_string(i) + ".wav";
-            sound_mappings_[i] = sound_file;
+        // Scan for district folders (1-10) and load all .wav files
+        RCLCPP_INFO(this->get_logger(), "Loading sound mappings from: %s", sounds_folder_.c_str());
+        
+        for (int button = 1; button <= 10; button++) {
+            std::vector<std::string> wav_files;
+            
+            // Try to find a folder that starts with the button number
+            for (const auto& entry : std::filesystem::directory_iterator(sounds_folder_)) {
+                if (!entry.is_directory()) continue;
+                
+                std::string folder_name = entry.path().filename().string();
+                // Check if folder starts with button number (e.g., "1. Ciutat Vella")
+                if (folder_name.find(std::to_string(button) + ".") == 0) {
+                    // Scan for .wav files in this folder
+                    for (const auto& file : std::filesystem::directory_iterator(entry.path())) {
+                        if (file.path().extension() == ".wav") {
+                            wav_files.push_back(file.path().string());
+                        }
+                    }
+                    break;
+                }
+            }
+            
+            if (!wav_files.empty()) {
+                sound_mappings_[button] = wav_files;
+                RCLCPP_INFO(this->get_logger(), "  Button %d: %zu sound(s) found", 
+                           button, wav_files.size());
+            } else {
+                RCLCPP_WARN(this->get_logger(), "  Button %d: No .wav files found (will use placeholder)", 
+                           button);
+            }
         }
         
-        // Check which sound files exist
-        RCLCPP_INFO(this->get_logger(), "Sound mappings:");
-        for (const auto& pair : sound_mappings_) {
-            bool exists = std::filesystem::exists(pair.second);
-            RCLCPP_INFO(this->get_logger(), "  Button %d -> %s [%s]", 
-                       pair.first, pair.second.c_str(), 
-                       exists ? "EXISTS" : "MISSING");
-        }
+        // Initialize random number generator
+        random_generator_.seed(std::chrono::system_clock::now().time_since_epoch().count());
     }
     
     void state_control_callback(const std_msgs::msg::String::SharedPtr msg)
@@ -201,17 +224,24 @@ private:
         RCLCPP_INFO(this->get_logger(), "Button %d pressed at %.2f seconds", 
                    button_number, time_elapsed);
         
-        // Get the sound file for this button
-        std::string sound_file = sound_mappings_[button_number];
-        
-        // Check if sound file exists
-        if (!std::filesystem::exists(sound_file)) {
-            RCLCPP_WARN(this->get_logger(), "Sound file not found: %s", sound_file.c_str());
-            // For now, generate a placeholder waveform
+        // Check if this button has any sound files
+        if (sound_mappings_.find(button_number) == sound_mappings_.end() || 
+            sound_mappings_[button_number].empty()) {
+            RCLCPP_WARN(this->get_logger(), "No sounds available for button %d, using placeholder", 
+                       button_number);
             generate_placeholder_waveform(button_number, time_elapsed);
         } else {
+            // Randomly select a sound file from the available options
+            const auto& sound_files = sound_mappings_[button_number];
+            std::uniform_int_distribution<size_t> distribution(0, sound_files.size() - 1);
+            size_t random_index = distribution(random_generator_);
+            std::string selected_file = sound_files[random_index];
+            
+            std::filesystem::path file_path(selected_file);
+            RCLCPP_INFO(this->get_logger(), "Selected: %s", file_path.filename().string().c_str());
+            
             // Load and add sound waveform to the matrix
-            load_and_add_sound(sound_file, button_number, time_elapsed);
+            load_and_add_sound(selected_file, button_number, time_elapsed);
         }
         
         RCLCPP_INFO(this->get_logger(), "Current waveform size: %zu points", waveform_matrix_.size());
@@ -248,10 +278,65 @@ private:
     
     void load_and_add_sound(const std::string& sound_file, int button_number, double time_offset)
     {
-        // TODO: Implement actual WAV file loading
-        // For now, use placeholder
-        RCLCPP_INFO(this->get_logger(), "Loading sound file: %s", sound_file.c_str());
-        generate_placeholder_waveform(button_number, time_offset);
+        // Open WAV file using libsndfile
+        SF_INFO sf_info;
+        SNDFILE* sf = sf_open(sound_file.c_str(), SFM_READ, &sf_info);
+        
+        if (!sf) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to open sound file: %s", sound_file.c_str());
+            RCLCPP_ERROR(this->get_logger(), "libsndfile error: %s", sf_strerror(nullptr));
+            generate_placeholder_waveform(button_number, time_offset);
+            return;
+        }
+        
+        // Read audio data
+        std::vector<float> audio_buffer(sf_info.frames * sf_info.channels);
+        sf_count_t frames_read = sf_readf_float(sf, audio_buffer.data(), sf_info.frames);
+        sf_close(sf);
+        
+        if (frames_read <= 0) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to read audio data from: %s", sound_file.c_str());
+            generate_placeholder_waveform(button_number, time_offset);
+            return;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Loaded WAV: %ld frames, %d channels, %d Hz", 
+                   frames_read, sf_info.channels, sf_info.samplerate);
+        
+        // Convert to mono if stereo (average channels)
+        std::vector<float> mono_audio;
+        if (sf_info.channels == 1) {
+            mono_audio = audio_buffer;
+        } else {
+            mono_audio.resize(frames_read);
+            for (sf_count_t i = 0; i < frames_read; i++) {
+                float sum = 0.0f;
+                for (int ch = 0; ch < sf_info.channels; ch++) {
+                    sum += audio_buffer[i * sf_info.channels + ch];
+                }
+                mono_audio[i] = sum / sf_info.channels;
+            }
+        }
+        
+        // Resample if needed (simple linear interpolation)
+        // YAMNet expects 16kHz, but we work with our sample_rate_ parameter
+        double time_per_sample = 1.0 / sf_info.samplerate;
+        
+        // Add audio data to waveform matrix
+        for (size_t i = 0; i < mono_audio.size(); i++) {
+            double t = time_offset + (i * time_per_sample);
+            double amplitude = static_cast<double>(mono_audio[i]);
+            
+            // Clamp amplitude to [-1, 1]
+            amplitude = std::max(-1.0, std::min(1.0, amplitude));
+            
+            waveform_matrix_.push_back({t, amplitude});
+        }
+        
+        // Update LED matrix
+        update_led_matrix();
+        
+        RCLCPP_INFO(this->get_logger(), "Added %zu samples to waveform", mono_audio.size());
     }
     
     void update_led_matrix()
@@ -355,12 +440,15 @@ private:
     int matrix_width_;   // 146 columns (time)
     std::vector<uint8_t> led_matrix_;  // Flattened matrix data
     
-    std::map<int, std::string> sound_mappings_;
+    std::map<int, std::vector<std::string>> sound_mappings_;  // Button -> list of sound files
     std::vector<WaveformPoint> waveform_matrix_;
     std::string last_waveform_file_;
     
     bool recording_active_;
     std::chrono::steady_clock::time_point recording_start_time_;
+    
+    // Random number generator for sound selection
+    std::mt19937 random_generator_;
 };
 
 int main(int argc, char** argv)

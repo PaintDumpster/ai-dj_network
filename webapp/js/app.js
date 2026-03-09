@@ -22,6 +22,12 @@ let mapCanvas = null;
 let mapCtx = null;
 let spectrumBars = new Array(64).fill(0);
 
+// Audio Playback
+let soundsMapping = {}; // Maps button number to array of sound file paths
+let audioContext = null;
+let audioBuffers = {}; // Preloaded audio buffers
+let audioEnabled = false;
+
 // =====================================================
 // INITIALIZATION
 // =====================================================
@@ -29,7 +35,107 @@ document.addEventListener('DOMContentLoaded', () => {
     connectWebSocket();
     initializeSpectrumBackgrounds();
     initializeLEDCanvas();
+    loadSoundMappings();
+    
+    // Enable audio on any user interaction
+    document.addEventListener('click', enableAudio, { once: true });
+    document.addEventListener('touchstart', enableAudio, { once: true });
 });
+
+// =====================================================
+// AUDIO PLAYBACK SYSTEM
+// =====================================================
+async function loadSoundMappings() {
+    try {
+        const response = await fetch('/api/sounds');
+        const data = await response.json();
+        soundsMapping = data.sounds || {};
+        console.log('✅ Sound mappings loaded:', Object.keys(soundsMapping).length, 'buttons');
+        console.log('Sound details:', soundsMapping);
+    } catch (error) {
+        console.error('❌ Failed to load sound mappings:', error);
+    }
+}
+
+function enableAudio() {
+    if (audioEnabled) return;
+    
+    console.log('🔊 Audio enabled by user interaction');
+    audioEnabled = true;
+    
+    // Create a silent audio to unlock audio playback
+    const silentAudio = new Audio();
+    silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    silentAudio.play().catch(e => console.log('Silent audio unlock failed:', e));
+}
+
+async function playRandomSound(buttonNumber) {
+    const buttonKey = buttonNumber.toString();
+    
+    console.log(`🎵 playRandomSound called for button ${buttonNumber}`);
+    
+    if (!soundsMapping[buttonKey]) {
+        console.warn(`⚠️ No sound mapping for button ${buttonNumber}`);
+        console.log('Available buttons:', Object.keys(soundsMapping));
+        return;
+    }
+    
+    if (soundsMapping[buttonKey].length === 0) {
+        console.warn(`⚠️ No sounds available for button ${buttonNumber}`);
+        return;
+    }
+    
+    // Select random sound
+    const sounds = soundsMapping[buttonKey];
+    const randomIndex = Math.floor(Math.random() * sounds.length);
+    const soundPath = sounds[randomIndex];
+    
+    console.log(`🎧 Playing: ${soundPath}`);
+    
+    try {
+        // Use HTML5 Audio for simpler playback
+        const audio = new Audio(soundPath);
+        audio.volume = 0.7; // Adjust volume
+        
+        // Add event listeners for debugging
+        audio.addEventListener('loadeddata', () => {
+            console.log('✅ Audio loaded successfully');
+        });
+        
+        audio.addEventListener('error', (e) => {
+            console.error('❌ Audio loading error:', e);
+            console.error('Failed path:', soundPath);
+        });
+        
+        audio.addEventListener('play', () => {
+            console.log('▶️ Audio playing');
+        });
+        
+        audio.addEventListener('ended', () => {
+            console.log('⏹️ Audio ended');
+        });
+        
+        // Play the sound
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise
+                .then(() => {
+                    console.log('✅ Play promise resolved');
+                })
+                .catch(error => {
+                    console.error('❌ Audio playback failed:', error);
+                    console.error('Error name:', error.name);
+                    console.error('Error message:', error.message);
+                    
+                    if (!audioEnabled) {
+                        console.warn('⚠️ Audio might be blocked. Try clicking the page first.');
+                    }
+                });
+        }
+    } catch (error) {
+        console.error('❌ Error creating/playing audio:', error);
+    }
+}
 
 // =====================================================
 // SPECTRUM BACKGROUND VISUALIZATION
@@ -257,16 +363,24 @@ function connectWebSocket() {
 
 // Handle incoming messages
 function handleMessage(data) {
-    console.log('Received:', data);
+    // Don't spam console with LED matrix updates
+    if (data.type !== 'led_matrix') {
+        console.log('📨 Received message:', data);
+    }
     
     if (data.type === 'state_change') {
+        console.log('🔄 State change:', data);
         handleStateChange(data);
     } else if (data.type === 'arduino') {
+        console.log('🔘 Arduino button press:', data);
         handleArduinoButtonPress(data);
     } else if (data.type === 'led_matrix') {
         handleLEDMatrixUpdate(data);
     } else if (data.type === 'classification') {
+        console.log('📊 Classification result:', data);
         handleClassificationResult(data);
+    } else {
+        console.log('⚠️ Unknown message type:', data.type, data);
     }
 }
 
@@ -372,19 +486,31 @@ function startRecordingDisplay() {
 
 // Arduino Button Press Handler
 function handleArduinoButtonPress(data) {
-    if (currentState !== 'recording') return;
+    console.log('🔘 Button press received:', data);
+    
+    if (currentState !== 'recording') {
+        console.log('⚠️ Not in recording state, ignoring button press');
+        return;
+    }
     
     const buttonNum = data.button.trim();
+    console.log('🎯 Processing button:', buttonNum);
+    
     buttonPresses.push({
         button: buttonNum,
         time: (Date.now() - recordingStartTime) / 1000
     });
+    
+    // Play sound for this button
+    playRandomSound(parseInt(buttonNum));
     
     // Highlight button
     const btnElement = document.querySelector(`.btn-indicator[data-btn="${buttonNum}"]`);
     if (btnElement) {
         btnElement.classList.add('active');
         setTimeout(() => btnElement.classList.remove('active'), 300);
+    } else {
+        console.warn('⚠️ Button indicator element not found for button:', buttonNum);
     }
 }
 
@@ -546,5 +672,12 @@ function restartApp() {
     changeState('welcome');
 }
 
+// Test sound playback (for debugging)
+function testSound() {
+    console.log('🧪 Manual test sound triggered');
+    playRandomSound(1); // Test with button 1
+}
+
 // Export for global access
 window.restartApp = restartApp;
+window.testSound = testSound;

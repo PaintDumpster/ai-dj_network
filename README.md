@@ -64,7 +64,7 @@ This ROS2-based system integrates:
 - Protocol: Compressed format (position + RGB values)
 - USB: Native USB JTAG/serial debug unit
 
-## ✅ Current Status (March 8, 2026)
+## ✅ Current Status (March 9, 2026)
 
 ### System Status: ✅ **FULLY FUNCTIONAL**
 
@@ -81,15 +81,30 @@ This ROS2-based system integrates:
   *  0  #  d     →  Button 11 (*), Button 10 (0)
   ```
 
+### Audio System - Barcelona District Sounds
+- ✅ **50 WAV files** - 5 sounds per button (10 Barcelona districts)
+- ✅ **Audio format** - 16kHz mono WAV (YAMNet compatible)
+- ✅ **Conversion tool** - `sounds/convert_audio.py` for batch conversion
+- ✅ **Random selection** - Each button plays random sound from its district
+- ✅ **Web playback** - Browser plays sounds when buttons pressed during recording
+- ✅ **District mapping**:
+  - Button 1: Ciutat Vella | Button 6: Gràcia
+  - Button 2: Eixample | Button 7: Horta-Guinardó
+  - Button 3: Sants-Montjuic | Button 8: Nou Barris
+  - Button 4: Les Corts | Button 9: Sant Andreu
+  - Button 5: Sarrià-St Gervasi | Button 10: Sant Martí
+
 ### ROS2 Nodes
 - ✅ **reader** - Fully functional
   - Publishes to `/arduino_data` (buttons 1-10)
   - Publishes to `/state_control` (button 11)
   - Tested with hardware, serial communication working
-- ✅ **build_waveform** - Fully functional
-  - Generates placeholder sine waves (220-880 Hz) for missing sound files
+- ✅ **build_waveform** - Fully functional with real audio
+  - Loads Barcelona district sounds from `sounds/` folders
+  - Random sound selection per button press
+  - libsndfile integration for WAV loading
   - Publishes real-time LED matrix data (42×146) at 10 Hz
-  - Saves CSV waveforms to `/tmp/waveform_<timestamp>.csv` (595k samples)
+  - Saves CSV waveforms to `/tmp/waveform_<timestamp>.csv`
   - Recording controlled by button 11 via web_bridge state machine
   - 30-second recording window working correctly
 - ✅ **writer** - Running and sending data
@@ -99,16 +114,20 @@ This ROS2-based system integrates:
 - ✅ **web_bridge** - Fully functional and integrated
   - State machine controller (owns state transitions)
   - WebSocket server broadcasting at 10 Hz
-  - REST API endpoints working
+  - REST API endpoints including `/api/sounds`
   - Serves webapp at http://localhost:8000
+  - Serves sound files via `/sounds/` static mount
   - Event loop properly captured for thread-safe broadcasting
   - Successfully manages: welcome → countdown → recording → recording_complete states
 - ⏳ **yamnet_classification** - Ready but not yet tested
 
-### Webapp (webapp)
+### Webapp (webapp/)
 - ✅ **Frontend** - Fully operational
   - Real-time waveform visualization (42×146 LED matrix canvas)
   - Button press indicators (1-10) with visual feedback
+  - **Audio playback** - Plays Barcelona sounds when buttons pressed
+  - Sound mapped to browser HTML5 Audio API
+  - Autoplay restrictions handled (user click required)
   - State machine UI with smooth transitions
   - WebSocket connection stable and receiving updates
   - Futuristic dark theme with neon effects
@@ -120,36 +139,52 @@ This ROS2-based system integrates:
   - Recording screen with live waveform at 10 Hz
   - Recording complete summary
   - State transitions synchronized between backend and frontend
+- ✅ **Audio Integration** - Fully working
+  - Loads sound mappings on page load from `/api/sounds`
+  - Random sound selection per button
+  - Volume set to 70% by default
+  - Debug logging with emoji markers for troubleshooting
 
-### Test Results (Latest Session)
+### Test Results (Latest Session - March 9, 2026)
 - ✅ Button presses detected and logged correctly
 - ✅ State control (button 11) triggers recording via web_bridge
-- ✅ Waveform generation working with placeholder sine waves
+- ✅ **Waveform generation** with real Barcelona district sounds (WAV files)
+- ✅ **Random sound selection** - Different sounds played per button press
+- ✅ **Web audio playback** - Browser plays sounds in real-time
 - ✅ LED matrix data published continuously during recording (6,132 bytes @ 10 Hz)
 - ✅ Webapp receives WebSocket messages and updates in real-time
 - ✅ State machine transitions: welcome → countdown → recording → recording_complete
-- ✅ 30-second recording completed successfully with 27 button presses
-- ✅ Waveform saved: `/tmp/waveform_1772971834479316003.csv` (595,350 points)
+- ✅ 30-second recording completed successfully with button presses
+- ✅ Waveform saved with real audio data (2.6M+ points)
 - ⚠️ **Known Issue**: Waveform visualization appears sparse/buggy (see Known Issues below)
 - ⏳ LED hardware display not tested (ESP32 sketch needed)
 - ⏳ YAMNet classification pending
 
-### Recording Session Example
+### Recording Session Example (with Barcelona Sounds)
 ```
 Button 11 pressed → Countdown (3s) → Recording starts
-  → Button presses: 1,2,3,5,7,8,9,7,5,4,2,3,1,4,5,5,7,8,9,4,2,1,3,9,8,2,5
+  → Button presses: 1,2,3,4,5,7,6
+  → Sounds played (random):
+    - Button 1: castellers-sant-jaume.wav (Ciutat Vella)
+    - Button 2: sant jordi.wav (Eixample)
+    - Button 3: festes sants.wav (Sants-Montjuic)
+    - Button 4: obras camp nou.wav (Les Corts)
+    - Button 5: Pl. Molina 2.wav (Sarrià-St Gervasi)
+    - Button 7: carrera de carretillas.wav (Horta-Guinardó)
+    - Button 6: Vallcarca 7.wav (Gràcia)
   → Duration: 30 seconds
-  → Waveform points: 595,350
+  → Waveform points: 2,679,105 (real audio samples)
   → LED matrix updates: ~300 (at 10 Hz)
   → State: recording → recording_complete
+  → Audio playback: ✅ Working in browser
 ```
 
 ### Next Steps
 1. **Fix waveform visualization** (see Known Issues)
-2. **Add sound files** to `sounds/` directory (optional - placeholders work)
-3. **Set up YAMNet models** for audio classification
-4. **Test classification** and color overlays
-5. **Implement ESP32 LED sketch** (optional - webapp visualization working)
+2. **Set up YAMNet models** for audio classification
+3. **Test classification** with real Barcelona district sounds
+4. **Implement ESP32 LED sketch** (optional - webapp visualization working)
+5. **Deploy to LED matrix hardware** for physical display
 
 ## ⚠️ Known Issues
 
@@ -466,18 +501,23 @@ Reads button press data from Arduino Uno button board via serial port.
 - **Parameters**: `port` (/dev/ttyACM0), `baud_rate` (9600)
 
 ### build_waveform
-Builds audio waveforms from button presses and generates LED matrix data.
+Builds audio waveforms from button presses with Barcelona district sounds and generates LED matrix data.
 - **Subscribes**: `arduino_data`, `state_control`
 - **Publishes**: `led_matrix` (std_msgs/UInt8MultiArray) - 42×146 grayscale waveform
+- **Sound Integration**:
+  - Loads WAV files from district folders (1. Ciutat Vella, 2. Eixample, etc.)
+  - Random sound selection per button (5 sounds per button)
+  - Uses libsndfile for WAV loading
+  - Mixes multiple sounds into single waveform
 - **Features**:
   - 30-second recording window
-  - Real-time waveform calculation
+  - Real-time waveform calculation with actual audio samples
   - CSV export to `/tmp/waveform_<timestamp>.csv`
   - LED matrix updates every 100ms
 - **Parameters**:
-  - `sounds_folder`: Path to button sound files
+  - `sounds_folder`: Path to button sound files (default: ~/iaac/ai4all/rosnetwork/sounds)
   - `recording_duration`: Recording time (default: 30.0s)
-  - `sample_rate`: Audio sample rate (default: 44100)
+  - `sample_rate`: Audio sample rate (default: 16000)
   - `matrix_update_rate`: LED refresh rate (default: 0.1s)
 
 ### yamnet_classification
