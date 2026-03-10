@@ -15,12 +15,6 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 websockets>=12.0
 
-# For YAMNet model conversion (optional - only if converting models)
-# These are NOT managed by rosdep - install manually if needed
-tensorflow>=2.13.0
-tf2onnx>=1.15.0
-tensorflow-hub>=0.14.0
-
 # CORS support (included in fastapi, but listed for clarity)
 python-multipart>=0.0.6
 

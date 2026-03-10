@@ -217,9 +217,9 @@ Each button has **5 different sounds** that are randomly selected on each press.
 **GET `/api/classifications`** - Get all classification results
 ```json
 {
-  "model1": ["Class A: 0.95", "Class B: 0.82", ...],
-  "model2": [...],
-  "model3": [...]
+  "surveillance": ["Class A: 0.95", "Class B: 0.82", ...],
+  "natural": [...],
+  "cultural": [...]
 }
 ```
 
@@ -264,7 +264,7 @@ Each button has **5 different sounds** that are randomly selected on each press.
 ```json
 {
   "type": "classification",
-  "model": "model1",
+  "model": "surveillance",
   "results": "1. Music: 0.95\n2. Piano: 0.87\n..."
 }
 ```

@@ -82,6 +82,9 @@ public:
         if (session_) {
             delete session_;
         }
+        if (yamnet_session_) {
+            delete yamnet_session_;
+        }
         if (env_) {
             delete env_;
         }
@@ -98,31 +101,54 @@ private:
         session_options.SetIntraOpNumThreads(4);
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         
-        // Load model
-        RCLCPP_INFO(this->get_logger(), "Loading model: %s", model_path_.c_str());
-        session_ = new Ort::Session(*env_, model_path_.c_str(), session_options);
+        // Load base YamNet model for embeddings
+        std::string models_dir = model_path_.substr(0, model_path_.find_last_of("/\\"));
+        std::string yamnet_base_path = models_dir + "/YamNet.onnx";
         
-        // Get input/output info
+        RCLCPP_INFO(this->get_logger(), "Loading base YamNet model: %s", yamnet_base_path.c_str());
+        yamnet_session_ = new Ort::Session(*env_, yamnet_base_path.c_str(), session_options);
+        
+        // Get YamNet input/output info
         Ort::AllocatorWithDefaultOptions allocator;
         
-        // Input info
+        size_t yamnet_inputs = yamnet_session_->GetInputCount();
+        RCLCPP_INFO(this->get_logger(), "YamNet inputs: %zu", yamnet_inputs);
+        for (size_t i = 0; i < yamnet_inputs; i++) {
+            auto input_name = yamnet_session_->GetInputNameAllocated(i, allocator);
+            yamnet_input_names_.push_back(input_name.get());
+            RCLCPP_INFO(this->get_logger(), "  YamNet Input %zu: %s", i, input_name.get());
+        }
+        
+        size_t yamnet_outputs = yamnet_session_->GetOutputCount();
+        RCLCPP_INFO(this->get_logger(), "YamNet outputs: %zu", yamnet_outputs);
+        for (size_t i = 0; i < yamnet_outputs; i++) {
+            auto output_name = yamnet_session_->GetOutputNameAllocated(i, allocator);
+            yamnet_output_names_.push_back(output_name.get());
+            RCLCPP_INFO(this->get_logger(), "  YamNet Output %zu: %s", i, output_name.get());
+        }
+        
+        // Load classification head model
+        RCLCPP_INFO(this->get_logger(), "Loading classification head: %s", model_path_.c_str());
+        session_ = new Ort::Session(*env_, model_path_.c_str(), session_options);
+        
+        // Get head input/output info
         size_t num_input_nodes = session_->GetInputCount();
-        RCLCPP_INFO(this->get_logger(), "Number of inputs: %zu", num_input_nodes);
+        RCLCPP_INFO(this->get_logger(), "Head inputs: %zu", num_input_nodes);
         
         for (size_t i = 0; i < num_input_nodes; i++) {
             auto input_name = session_->GetInputNameAllocated(i, allocator);
             input_node_names_.push_back(input_name.get());
-            RCLCPP_INFO(this->get_logger(), "Input %zu: %s", i, input_name.get());
+            RCLCPP_INFO(this->get_logger(), "  Head Input %zu: %s", i, input_name.get());
         }
         
         // Output info
         size_t num_output_nodes = session_->GetOutputCount();
-        RCLCPP_INFO(this->get_logger(), "Number of outputs: %zu", num_output_nodes);
+        RCLCPP_INFO(this->get_logger(), "Head outputs: %zu", num_output_nodes);
         
         for (size_t i = 0; i < num_output_nodes; i++) {
             auto output_name = session_->GetOutputNameAllocated(i, allocator);
             output_node_names_.push_back(output_name.get());
-            RCLCPP_INFO(this->get_logger(), "Output %zu: %s", i, output_name.get());
+            RCLCPP_INFO(this->get_logger(), "  Head Output %zu: %s", i, output_name.get());
         }
     }
     
@@ -329,55 +355,111 @@ private:
     
     std::vector<std::pair<int, float>> run_inference(const std::vector<float>& input_data)
     {
-        // Create input tensor
-        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(input_data.size())};
-        
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
         
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        // ===== STAGE 1: Extract YamNet embeddings =====
+        // Create input tensor for YamNet - expects 1D: [num_samples]
+        std::vector<int64_t> audio_shape = {static_cast<int64_t>(input_data.size())};
+        
+        Ort::Value audio_tensor = Ort::Value::CreateTensor<float>(
             memory_info,
             const_cast<float*>(input_data.data()),
             input_data.size(),
-            input_shape.data(),
-            input_shape.size()
+            audio_shape.data(),
+            audio_shape.size()
         );
         
-        // Prepare input/output names
-        std::vector<const char*> input_names;
-        std::vector<const char*> output_names;
+        // Prepare YamNet input/output names
+        std::vector<const char*> yamnet_input_names;
+        std::vector<const char*> yamnet_output_names;
+        
+        for (const auto& name : yamnet_input_names_) {
+            yamnet_input_names.push_back(name.c_str());
+        }
+        for (const auto& name : yamnet_output_names_) {
+            yamnet_output_names.push_back(name.c_str());
+        }
+        
+        // Run YamNet to get embeddings
+        auto yamnet_outputs = yamnet_session_->Run(
+            Ort::RunOptions{nullptr},
+            yamnet_input_names.data(),
+            &audio_tensor,
+            1,
+            yamnet_output_names.data(),
+            yamnet_output_names.size()
+        );
+        
+        // Extract embeddings - shape is [num_frames, 1024]
+        float* embeddings_data = yamnet_outputs[0].GetTensorMutableData<float>();
+        auto embeddings_shape = yamnet_outputs[0].GetTensorTypeAndShapeInfo().GetShape();
+        size_t num_frames = embeddings_shape[0];
+        size_t embedding_size = embeddings_shape[1];
+        
+        RCLCPP_INFO(this->get_logger(), "YamNet embeddings extracted: [%zu frames, %zu dims]", 
+                   num_frames, embedding_size);
+        
+        // Average embeddings across all frames to get single 1024-dim vector
+        std::vector<float> avg_embeddings(embedding_size, 0.0f);
+        for (size_t frame = 0; frame < num_frames; frame++) {
+            for (size_t dim = 0; dim < embedding_size; dim++) {
+                avg_embeddings[dim] += embeddings_data[frame * embedding_size + dim];
+            }
+        }
+        for (size_t dim = 0; dim < embedding_size; dim++) {
+            avg_embeddings[dim] /= num_frames;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Averaged embeddings across %zu frames", num_frames);
+        
+        // ===== STAGE 2: Run classification head =====
+        // Create input tensor for classification head (expects [1, 1024])
+        std::vector<int64_t> head_input_shape = {1, static_cast<int64_t>(embedding_size)};
+        
+        Ort::Value embedding_tensor = Ort::Value::CreateTensor<float>(
+            memory_info,
+            avg_embeddings.data(),
+            avg_embeddings.size(),
+            head_input_shape.data(),
+            head_input_shape.size()
+        );
+        
+        // Prepare classification head input/output names
+        std::vector<const char*> head_input_names;
+        std::vector<const char*> head_output_names;
         
         for (const auto& name : input_node_names_) {
-            input_names.push_back(name.c_str());
+            head_input_names.push_back(name.c_str());
         }
         for (const auto& name : output_node_names_) {
-            output_names.push_back(name.c_str());
+            head_output_names.push_back(name.c_str());
         }
         
-        // Run inference
+        // Run classification head
         auto output_tensors = session_->Run(
             Ort::RunOptions{nullptr},
-            input_names.data(),
-            &input_tensor,
+            head_input_names.data(),
+            &embedding_tensor,
             1,
-            output_names.data(),
-            output_names.size()
+            head_output_names.data(),
+            head_output_names.size()
         );
         
-        // Process output (assuming first output is the class scores)
+        // Process output (class scores)
         float* output_data = output_tensors[0].GetTensorMutableData<float>();
         auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
         
         size_t num_classes = output_shape[output_shape.size() - 1];
-        size_t num_frames = 1;
+        size_t output_frames = 1;
         if (output_shape.size() > 1) {
-            num_frames = output_shape[0];
+            output_frames = output_shape[0];
         }
         
         // Store frame-by-frame predictions for time-based analysis
         frame_predictions_.clear();
         
-        for (size_t frame = 0; frame < num_frames; frame++) {
+        for (size_t frame = 0; frame < output_frames; frame++) {
             std::vector<std::pair<int, float>> frame_preds;
             size_t offset = frame * num_classes;
             
@@ -536,7 +618,10 @@ public:
 private:
     // ONNX Runtime objects
     Ort::Env* env_ = nullptr;
-    Ort::Session* session_ = nullptr;
+    Ort::Session* yamnet_session_ = nullptr;  // Base YamNet model
+    Ort::Session* session_ = nullptr;         // Classification head
+    std::vector<std::string> yamnet_input_names_;
+    std::vector<std::string> yamnet_output_names_;
     std::vector<std::string> input_node_names_;
     std::vector<std::string> output_node_names_;
     

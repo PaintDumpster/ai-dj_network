@@ -48,6 +48,16 @@ Thumbs.db
 *.db3-shm
 *.db3-wal
 
+# Models - Ignore large binary files
+models/*.onnx
+models/.venv/
+models/venv/
+models/yamnet_savedmodel/
+models/*.tar.gz
+models/*.zip
+models/*.h5
+models/*.pb
+
 # Audio files
 *.wav
 *.mp3

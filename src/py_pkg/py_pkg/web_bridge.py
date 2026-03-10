@@ -83,9 +83,9 @@ class WebBridgeNode(Node):
         self.led_matrix_data = None
         self.waveform_status = {"recording": False, "duration": 0}
         self.classification_results = {
-            "model1": [],
-            "model2": [],
-            "model3": []
+            "surveillance": [],
+            "natural": [],
+            "cultural": []
         }
         
         # Subscribe to state control (button 11)
@@ -113,24 +113,24 @@ class WebBridgeNode(Node):
         )
         
         # Subscribe to classification results from 3 models
-        self.classification_sub1 = self.create_subscription(
+        self.classification_sub_surveillance = self.create_subscription(
             String,
-            'classification_results_model1',
-            lambda msg: self.classification_callback(msg, 'model1'),
+            'classification_results_surveillance',
+            lambda msg: self.classification_callback(msg, 'surveillance'),
             10
         )
         
-        self.classification_sub2 = self.create_subscription(
+        self.classification_sub_natural = self.create_subscription(
             String,
-            'classification_results_model2',
-            lambda msg: self.classification_callback(msg, 'model2'),
+            'classification_results_natural',
+            lambda msg: self.classification_callback(msg, 'natural'),
             10
         )
         
-        self.classification_sub3 = self.create_subscription(
+        self.classification_sub_cultural = self.create_subscription(
             String,
-            'classification_results_model3',
-            lambda msg: self.classification_callback(msg, 'model3'),
+            'classification_results_cultural',
+            lambda msg: self.classification_callback(msg, 'cultural'),
             10
         )
         
@@ -139,9 +139,9 @@ class WebBridgeNode(Node):
         self.stop_recording_client = self.create_client(Trigger, 'stop_recording')
         
         # Clients for YAMNet classification services (names match three_yamnet_models.launch.py)
-        self.classify_model1_client = self.create_client(Trigger, 'classify_waveform_Model_1_Original')
-        self.classify_model2_client = self.create_client(Trigger, 'classify_waveform_Model_2_DatasetA')
-        self.classify_model3_client = self.create_client(Trigger, 'classify_waveform_Model_3_DatasetB')
+        self.classify_surveillance_client = self.create_client(Trigger, 'classify_waveform_surveillance')
+        self.classify_natural_client = self.create_client(Trigger, 'classify_waveform_natural')
+        self.classify_cultural_client = self.create_client(Trigger, 'classify_waveform_cultural')
         
         self.get_logger().info('Web Bridge Node initialized')
     
@@ -257,9 +257,9 @@ class WebBridgeNode(Node):
         
         # Call classification service for each model
         for client, model_name in [
-            (self.classify_model1_client, 'Model 1'),
-            (self.classify_model2_client, 'Model 2'),
-            (self.classify_model3_client, 'Model 3')
+            (self.classify_surveillance_client, 'Surveillance'),
+            (self.classify_natural_client, 'Natural'),
+            (self.classify_cultural_client, 'Cultural')
         ]:
             if not client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().warn(f'Classification service for {model_name} not available')
@@ -375,11 +375,11 @@ async def get_classifications():
     """Get all classification results from 3 models"""
     if bridge_node:
         return {
-            "model1": bridge_node.classification_results["model1"],
-            "model2": bridge_node.classification_results["model2"],
-            "model3": bridge_node.classification_results["model3"]
+            "surveillance": bridge_node.classification_results["surveillance"],
+            "natural": bridge_node.classification_results["natural"],
+            "cultural": bridge_node.classification_results["cultural"]
         }
-    return {"model1": [], "model2": [], "model3": []}
+    return {"surveillance": [], "natural": [], "cultural": []}
 
 
 @app.get("/api/classifications/{model_name}")
