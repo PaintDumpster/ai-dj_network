@@ -882,11 +882,7 @@ ros2 topic echo /led_matrix
 ros2 topic echo /led_paint_commands
 ```
 
-## 📄 License
-
-[Add your license information]
-
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **YAMNet**: Google Research (AudioSet)
 - **ONNX Runtime**: Microsoft
