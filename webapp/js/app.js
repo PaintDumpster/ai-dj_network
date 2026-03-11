@@ -7,6 +7,7 @@ let reconnectInterval = null;
 let recordingStartTime = null;
 let recordingTimer = null;
 let buttonPresses = [];
+let classificationResults = new Set(); // Track which models have reported
 
 // LED Matrix Configuration
 const MATRIX_WIDTH = 146; // 30 seconds
@@ -425,6 +426,7 @@ function changeState(newState) {
             break;
         case 'analyzing':
             document.getElementById('screen-analyzing').classList.add('active');
+            classificationResults.clear(); // Reset for new classification
             console.log('Analyzing...');
             break;
         case 'results':
@@ -647,8 +649,18 @@ function handleClassificationResult(data) {
         container.appendChild(resultItem);
     });
     
-    // If this is the last model result, change to results state
-    // (In practice, you'd track which models have reported)
+    // Track which models have reported
+    classificationResults.add(data.model);
+    console.log(`✅ Received result from ${data.model} (${classificationResults.size}/3)`);
+    
+    // If all three models have reported, transition to results state
+    if (classificationResults.size === 3) {
+        console.log('🎉 All classification results received, showing results screen');
+        setTimeout(() => {
+            changeState('results');
+            classificationResults.clear(); // Reset for next classification
+        }, 500); // Small delay for smoother transition
+    }
 }
 
 // Connection Status

@@ -702,32 +702,32 @@ body {
     text-shadow: 0 0 10px currentColor;
 }
 
-.model-1 {
+.model-surveillance {
     border-left-color: var(--color-neon-red);
     color: var(--color-neon-red);
 }
 
-.model-1:hover {
+.model-surveillance:hover {
     background: rgba(255, 0, 0, 0.15);
     box-shadow: 0 0 20px var(--color-neon-red);
 }
 
-.model-2 {
+.model-natural {
     border-left-color: var(--color-neon-cyan);
     color: var(--color-neon-cyan);
 }
 
-.model-2:hover {
+.model-natural:hover {
     background: rgba(0, 255, 255, 0.15);
     box-shadow: 0 0 20px var(--color-neon-cyan);
 }
 
-.model-3 {
+.model-cultural {
     border-left-color: var(--color-neon-yellow);
     color: var(--color-neon-yellow);
 }
 
-.model-3:hover {
+.model-cultural:hover {
     background: rgba(255, 255, 0, 0.15);
     box-shadow: 0 0 20px var(--color-neon-yellow);
 }
