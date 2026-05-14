@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'web_bridge = py_pkg.web_bridge:main',
+            'llm_node = py_pkg.llm_node:main',
         ],
     },
 )
