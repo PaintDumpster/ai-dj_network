@@ -7,7 +7,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-GROQ_MODEL = 'llama3-8b-8192'
+GROQ_MODEL = 'llama-3.1-8b-instant'
 SYSTEM_PROMPT = (
     'You are a voice avatar. Convert audio classification results into a single '
     'warm, natural spoken English sentence. Never mention YAMNet, confidence scores, '
@@ -101,6 +101,8 @@ class LLMNode(Node):
                 json=body,
                 timeout=5,
             )
+            if not resp.ok:
+                self.get_logger().error(f'Groq API error {resp.status_code}: {resp.text}')
             resp.raise_for_status()
             return resp.json()['choices'][0]['message']['content'].strip()
         except requests.exceptions.Timeout:
