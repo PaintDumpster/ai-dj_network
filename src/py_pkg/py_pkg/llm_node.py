@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import threading
 import requests
 import rclpy
@@ -19,15 +20,25 @@ SYSTEM_PROMPT = (
 FALLBACK_MESSAGE = "I'm not sure what I heard just now."
 
 # Matches lines like "1. Music: 0.8745"
-_TOP_RESULT_RE = re.compile(r'1\.\s+(.+?):\s+([\d.]+)')
+_RESULT_RE = re.compile(r'(\d+)\.\s+(.+?):\s+([\d.]+)')
+# Matches model name from header like "[surveillance] Classification Results:"
+_MODEL_RE = re.compile(r'\[(\w+)\]')
 
 
-def parse_top_result(text):
-    """Return (label, confidence) from a classification_results message, or None."""
-    match = _TOP_RESULT_RE.search(text)
-    if not match:
+def parse_results(text):
+    """Return (model_name, top_label, top_confidence, top3_list) or None."""
+    model_match = _MODEL_RE.search(text)
+    model_name = model_match.group(1) if model_match else 'unknown'
+
+    results = []
+    for m in _RESULT_RE.finditer(text):
+        results.append({'label': m.group(2).strip(), 'score': float(m.group(3))})
+
+    if not results:
         return None
-    return match.group(1).strip(), float(match.group(2))
+
+    top3 = results[:3]
+    return model_name, top3[0]['label'], top3[0]['score'], top3
 
 
 class LLMNode(Node):
@@ -48,33 +59,46 @@ class LLMNode(Node):
         ):
             self.create_subscription(String, topic, self._classification_callback, 10)
 
-        self.publisher = self.create_publisher(String, '/avatar_speech', 10)
+        self.avatar_pub = self.create_publisher(String, '/avatar_speech', 10)
+        self.results_pub = self.create_publisher(String, '/model_results', 10)
 
         self.get_logger().info('LLM Node initialized')
 
     def _classification_callback(self, msg):
         """Receive a classification result, parse it, call Groq in a thread."""
-        result = parse_top_result(msg.data)
-        if result is None:
+        parsed = parse_results(msg.data)
+        if parsed is None:
             self.get_logger().warn('Could not parse classification result message')
             return
 
-        label, confidence = result
-        self.get_logger().info(f'Top result: {label} ({confidence:.2f})')
+        model_name, label, confidence, top3 = parsed
+        self.get_logger().info(f'[{model_name}] Top result: {label} ({confidence:.2f})')
 
         threading.Thread(
             target=self._call_groq_and_publish,
-            args=(label, confidence),
+            args=(model_name, label, confidence, top3),
             daemon=True
         ).start()
 
-    def _call_groq_and_publish(self, label, confidence):
-        """Call the Groq API and publish the result (runs in a background thread)."""
-        response_text = self._call_groq(label, confidence)
+    def _call_groq_and_publish(self, model_name, label, confidence, top3):
+        """Call the Groq API and publish combined result (runs in a background thread)."""
+        sentence = self._call_groq(label, confidence)
+
+        # Publish plain sentence to /avatar_speech (existing behaviour)
         out = String()
-        out.data = response_text
-        self.publisher.publish(out)
-        self.get_logger().info(f'Published to /avatar_speech: {response_text}')
+        out.data = sentence
+        self.avatar_pub.publish(out)
+
+        # Publish combined JSON to /model_results
+        combined = String()
+        combined.data = json.dumps({
+            'model': model_name,
+            'top3': top3,
+            'sentence': sentence,
+        })
+        self.results_pub.publish(combined)
+
+        self.get_logger().info(f'[{model_name}] {sentence}')
 
     def _call_groq(self, label, confidence):
         """Make the HTTP request to Groq. Returns the LLM text or the fallback."""
