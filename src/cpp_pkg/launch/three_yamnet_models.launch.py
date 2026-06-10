@@ -11,12 +11,8 @@ def generate_launch_description():
     - Publishes classification results
     """
     
-    # Resolve workspace path — set AI_DJ_WORKSPACE in ~/.bashrc to match your clone location.
-    # Falls back to the original default if the variable is not set.
-    workspace = os.environ.get(
-        'AI_DJ_WORKSPACE',
-        os.path.expanduser('~/iaac/ai4all/rosnetwork')
-    )
+    # Get workspace path
+    workspace = os.path.expanduser('~/iaac/ai4all/rosnetwork')
     models_path = os.path.join(workspace, 'models')
     
     # Surveillance Model: Red (255, 0, 0)
