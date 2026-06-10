@@ -882,6 +882,32 @@ ros2 topic echo /led_matrix
 ros2 topic echo /led_paint_commands
 ```
 
+## LLM Node
+
+The `llm_node` converts YAMNet audio classification results into natural spoken English sentences using the Groq LLM API.
+
+### Get a free Groq API key
+
+1. Go to [console.groq.com](https://console.groq.com)
+2. Sign up for a free account
+3. Navigate to **API Keys** and create a new key
+
+### Set the environment variable
+
+```bash
+export GROQ_API_KEY=your_key_here
+```
+
+Add this line to your `~/.bashrc` to make it permanent.
+
+### Launch the node
+
+```bash
+ros2 run py_pkg llm_node
+```
+
+The node subscribes to `classification_results_surveillance`, `classification_results_natural`, and `classification_results_cultural`, picks the top result from whichever fires, and publishes the LLM response to `/avatar_speech` as a plain string.
+
 ## Acknowledgments
 
 - **YAMNet**: Google Research (AudioSet)
