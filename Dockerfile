@@ -35,10 +35,17 @@ FROM ros:kilted-ros-base-noble AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+# Use a venv so pip can upgrade packages like typing-extensions without
+# conflicting with the Debian-managed versions (which have no RECORD file).
+# --system-site-packages keeps ROS2's rclpy and friends visible inside the venv.
 COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+RUN python3 -m venv /opt/venv --system-site-packages && \
+    /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY --from=ros-builder /opt/onnxruntime /opt/onnxruntime
 COPY --from=ros-builder /ros2_ws/install /ros2_ws/install
