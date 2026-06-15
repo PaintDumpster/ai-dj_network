@@ -18,6 +18,9 @@ websockets>=12.0
 # CORS support (included in fastapi, but listed for clarity)
 python-multipart>=0.0.6
 
+# LLM
+anthropic>=0.40.0
+
 # ROS2 Python packages (installed with ROS2, not via pip)
 # - rclpy
 # - std_msgs

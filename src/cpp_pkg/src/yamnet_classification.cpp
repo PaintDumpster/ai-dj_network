@@ -53,9 +53,13 @@ public:
         
         // Publisher for classification results
         classification_pub_ = this->create_publisher<std_msgs::msg::String>(output_topic_, 10);
-        
+
         // Publisher for LED paint commands
         paint_pub_ = this->create_publisher<std_msgs::msg::String>("led_paint_commands", 10);
+
+        // Publisher for Pico board 2 — per-second confidence scores (JSON string)
+        // Each message: {"model":"surveillance","color":[R,G,B],"per_second":[{"second":0,"scores":{...}},...]}
+        pico_confidence_publisher_ = this->create_publisher<std_msgs::msg::String>("pico_confidence", 10);
         
         // Service for triggering classification
         classify_service_ = this->create_service<std_srvs::srv::Trigger>(
@@ -528,11 +532,14 @@ private:
             }
         }
         
-        // Publish results
+        // Publish classification results
         auto msg = std_msgs::msg::String();
         msg.data = result_msg;
         classification_pub_->publish(msg);
-        
+
+        // Publish per-second confidence scores for Pico board color-coding
+        publish_pico_confidence();
+
         // Send paint commands for top prediction time segments
         if (!predictions.empty() && !class_time_segments.empty()) {
             int top_class = predictions[0].first;
@@ -590,6 +597,65 @@ private:
         return segments;
     }
     
+    void publish_pico_confidence()
+    {
+        // Aggregate per-frame predictions (~0.096s each) into 1-second bins.
+        // Publishes JSON string to /pico_confidence for Pico board color-coding.
+        const double frame_duration = 0.096;
+        const size_t num_classes = class_names_.size();
+        if (frame_predictions_.empty() || num_classes == 0) return;
+
+        double total_duration = frame_predictions_.size() * frame_duration;
+        int total_seconds = static_cast<int>(std::ceil(total_duration));
+
+        std::string json = "{";
+        json += "\"model\":\"" + model_name_ + "\",";
+        json += "\"color\":[" + std::to_string(model_color_r_) + "," +
+                                std::to_string(model_color_g_) + "," +
+                                std::to_string(model_color_b_) + "],";
+        json += "\"per_second\":[";
+
+        for (int sec = 0; sec < total_seconds; sec++) {
+            // Collect frames that fall within this second
+            size_t frame_start = static_cast<size_t>(sec / frame_duration);
+            size_t frame_end   = static_cast<size_t>((sec + 1) / frame_duration);
+            frame_end = std::min(frame_end, frame_predictions_.size());
+
+            // Average scores per class across frames in this second
+            std::vector<double> avg_scores(num_classes, 0.0);
+            size_t count = 0;
+            for (size_t f = frame_start; f < frame_end; f++) {
+                for (const auto& pred : frame_predictions_[f]) {
+                    if (pred.first >= 0 && static_cast<size_t>(pred.first) < num_classes) {
+                        avg_scores[pred.first] += pred.second;
+                    }
+                }
+                count++;
+            }
+            if (count > 0) {
+                for (auto& s : avg_scores) s /= count;
+            }
+
+            if (sec > 0) json += ",";
+            json += "{\"second\":" + std::to_string(sec) + ",\"scores\":{";
+            for (size_t c = 0; c < num_classes; c++) {
+                if (c > 0) json += ",";
+                // Escape class name (simple)
+                std::string name = class_names_[c];
+                json += "\"" + name + "\":" + std::to_string(static_cast<float>(avg_scores[c]));
+            }
+            json += "}}";
+        }
+
+        json += "]}";
+
+        auto msg = std_msgs::msg::String();
+        msg.data = json;
+        pico_confidence_publisher_->publish(msg);
+        RCLCPP_INFO(this->get_logger(), "Published pico_confidence for %s (%d seconds)",
+                    model_name_.c_str(), total_seconds);
+    }
+
     void send_paint_command(double start_time, double end_time)
     {
         // Send command to paint LED matrix columns with model color
@@ -645,6 +711,7 @@ private:
     // ROS objects
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr classification_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr paint_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pico_confidence_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr classify_service_;
 };
@@ -653,14 +720,6 @@ int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<YAMNetClassifier>();
-    
-    // Example: Classify a specific file if provided as argument
-    if (argc > 1) {
-        std::string waveform_file = argv[1];
-        RCLCPP_INFO(node->get_logger(), "Classifying provided file: %s", waveform_file.c_str());
-        node->classify_file(waveform_file);
-    }
-    
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

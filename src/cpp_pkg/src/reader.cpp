@@ -22,50 +22,69 @@ public:
             return;
         }
 
-        publisher_ = this->create_publisher<std_msgs::msg::String>("arduino_data", 10);
-        state_control_publisher_ = this->create_publisher<std_msgs::msg::String>("state_control", 10);
+        // Sound button press/release events (PRESS_n / RELEASE_n, n=1..10)
+        arduino_pub_ = this->create_publisher<std_msgs::msg::String>("arduino_data", 10);
+        // Navigation events (NAV_A/B/C/D, SELECT, BACK)
+        nav_pub_ = this->create_publisher<std_msgs::msg::String>("nav_data", 10);
+        // SELECT also mirrors on state_control for backward compat with existing nodes
+        state_control_pub_ = this->create_publisher<std_msgs::msg::String>("state_control", 10);
+
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(100),
+            std::chrono::milliseconds(50),
             std::bind(&reader::read_and_publish, this)
         );
     }
+
 private:
     std::string trim(const std::string& str)
     {
-        // Remove leading and trailing whitespace (including \r and \n)
         size_t start = str.find_first_not_of(" \t\r\n");
         if (start == std::string::npos) return "";
         size_t end = str.find_last_not_of(" \t\r\n");
         return str.substr(start, end - start + 1);
     }
-    
+
+    bool starts_with(const std::string& str, const std::string& prefix)
+    {
+        return str.size() >= prefix.size() && str.compare(0, prefix.size(), prefix) == 0;
+    }
+
     void read_and_publish()
     {
         std::string data = serial_->readline();
-        if (!data.empty()) {
-            // Strip whitespace and carriage returns
-            data = trim(data);
-            
-            if (data.empty()) return;
-            
-            auto message = std_msgs::msg::String();
-            message.data = data;
-            
-            // Button 11 is for state control, publish to separate topic
-            if (data == "11") {
-                state_control_publisher_->publish(message);
-                RCLCPP_INFO(this->get_logger(), "State control button pressed");
-            } else {
-                // Buttons 1-10 are for sounds
-                publisher_->publish(message);
-                RCLCPP_INFO(this->get_logger(), "Published: '%s'", message.data.c_str());
-            }
+        if (data.empty()) return;
+
+        data = trim(data);
+        if (data.empty()) return;
+
+        auto msg = std_msgs::msg::String();
+        msg.data = data;
+
+        // Sound buttons: PRESS_n or RELEASE_n  (n = 1..10)
+        if (starts_with(data, "PRESS_") || starts_with(data, "RELEASE_")) {
+            arduino_pub_->publish(msg);
+            RCLCPP_DEBUG(this->get_logger(), "Sound event: %s", data.c_str());
+            return;
         }
+
+        // Navigation: NAV_A/B/C/D, SELECT, BACK
+        if (starts_with(data, "NAV_") || data == "SELECT" || data == "BACK") {
+            nav_pub_->publish(msg);
+            RCLCPP_DEBUG(this->get_logger(), "Nav event: %s", data.c_str());
+            // SELECT is also forwarded to state_control so existing ROS nodes still work
+            if (data == "SELECT") {
+                state_control_pub_->publish(msg);
+            }
+            return;
+        }
+
+        RCLCPP_WARN(this->get_logger(), "Unknown token from Arduino: '%s'", data.c_str());
     }
 
     std::unique_ptr<SerialPort> serial_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_control_publisher_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr arduino_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr nav_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_control_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

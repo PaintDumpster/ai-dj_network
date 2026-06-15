@@ -1,6 +1,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8_multi_array.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <vector>
 #include <string>
@@ -17,8 +18,8 @@ public:
     WaveformBuilder() : Node("waveform_builder"), recording_active_(false)
     {
         // LED Matrix dimensions
-        matrix_height_ = 42;  // Amplitude bins
-        matrix_width_ = 146;  // Time bins (30 seconds)
+        matrix_height_ = 74;   // Amplitude bins
+        matrix_width_ = 75;    // Time bins (30 seconds)
         
         // Initialize LED matrix
         led_matrix_.resize(matrix_height_ * matrix_width_, 0);
@@ -47,8 +48,13 @@ public:
         // build_waveform only responds to service calls (start_recording/stop_recording)
         // state_control_subscription_ commented out to avoid conflicts with webapp state machine
         
-        // Publisher for LED matrix data
+        // Publisher for LED matrix data (74×75 full matrix, grayscale uint8)
         matrix_publisher_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("led_matrix", 10);
+
+        // Publisher for Pico boards — normalized waveform shape (float32, 74×75)
+        // Published once when stop_recording is called; Pico uses this to render the waveform.
+        // A separate /pico_confidence topic carries the per-second scores for color-coding.
+        pico_waveform_publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("pico_waveform", 10);
         
         // Timer to periodically publish matrix updates
         matrix_timer_ = this->create_wall_timer(
@@ -143,17 +149,21 @@ private:
             return;
         }
         
-        // Parse button number from Arduino data
+        // Parse new protocol: only PRESS_n events trigger sound (RELEASE_n is ignored here)
+        const std::string& token = msg->data;
+        const std::string press_prefix = "PRESS_";
+        if (token.rfind(press_prefix, 0) != 0) {
+            return; // RELEASE_n or unexpected token — ignore
+        }
         try {
-            int button_number = std::stoi(msg->data);
-            
+            int button_number = std::stoi(token.substr(press_prefix.size()));
             if (button_number >= 1 && button_number <= 10) {
                 process_button_press(button_number, elapsed);
             } else {
                 RCLCPP_WARN(this->get_logger(), "Invalid button number: %d", button_number);
             }
         } catch (const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "Failed to parse button data: %s", msg->data.c_str());
+            RCLCPP_WARN(this->get_logger(), "Failed to parse button data: %s", token.c_str());
         }
     }
     
@@ -215,7 +225,10 @@ private:
         
         // Save waveform to file
         save_waveform();
-        
+
+        // Publish normalized waveform for Pico boards
+        publish_pico_waveform();
+
         RCLCPP_INFO(this->get_logger(), "Ready to start new recording on next button press");
     }
     
@@ -395,6 +408,28 @@ private:
         matrix_publisher_->publish(msg);
     }
     
+    void publish_pico_waveform()
+    {
+        // Normalize the uint8 LED matrix (0-255) to float32 (0.0-1.0) and publish
+        auto msg = std_msgs::msg::Float32MultiArray();
+        msg.layout.dim.resize(2);
+        msg.layout.dim[0].label = "height";
+        msg.layout.dim[0].size = matrix_height_;
+        msg.layout.dim[0].stride = matrix_height_ * matrix_width_;
+        msg.layout.dim[1].label = "width";
+        msg.layout.dim[1].size = matrix_width_;
+        msg.layout.dim[1].stride = matrix_width_;
+
+        msg.data.resize(led_matrix_.size());
+        for (size_t i = 0; i < led_matrix_.size(); i++) {
+            msg.data[i] = led_matrix_[i] / 255.0f;
+        }
+
+        pico_waveform_publisher_->publish(msg);
+        RCLCPP_INFO(this->get_logger(), "Published pico_waveform: %zu floats (%dx%d)",
+                    msg.data.size(), matrix_height_, matrix_width_);
+    }
+
     void save_waveform()
     {
         std::string output_file = "/tmp/waveform_" + 
@@ -425,6 +460,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr state_control_subscription_;
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr matrix_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pico_waveform_publisher_;
     rclcpp::TimerBase::SharedPtr matrix_timer_;
     
     // Services

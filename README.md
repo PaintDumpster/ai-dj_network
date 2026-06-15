@@ -1,916 +1,280 @@
-# AI DJ - ROS2 Audio Classification & LED Visualization System
+# AI DJ — Audio Bias Pavilion
 
-An interactive audio system that uses Arduino button inputs to build live waveforms, classifies them using multiple YAMNet models, and displays results on an RGB LED matrix in real-time.
-
-## 🎯 Project Overview
-
-This ROS2-based system integrates:
-- **Hardware Interface**: Two controller boards
-  - **Button Input Board** (Arduino Uno @ /dev/ttyACM0): 10 buttons for live audio composition + state control
-  - **LED Control Board** (ESP32 @ /dev/ttyACM1): RGB LED matrix driver (42×146 pixels)
-- **Waveform Generation**: Real-time audio waveform building from button presses
-- **Multi-Model Classification**: Parallel YAMNet models for audio event detection
-- **LED Visualization**: 42×146 RGB matrix displaying waveforms with classification highlights
-- **Web Interface**: Real-time visualization and control via web browser
-
-## 🏗️ System Architecture
-
-```
-┌──────────────────┐                    ┌──────────────────┐
-│  Arduino Uno     │                    │      ESP32       │
-│   Button Input   │                    │   LED Matrix     │
-│   /dev/ttyACM0   │                    │   /dev/ttyACM1   │
-│  (10 + 1 button) │                    │   (42×146 RGB)   │
-└────────┬─────────┘                    └────────▲─────────┘
-         │ Serial                                │ Serial
-         ▼                                       │
-┌──────────────┐                                 │
-│    reader    │ → arduino_data topic            │
-└──────┬───────┘                                 │
-       ▼                                         │
-┌──────────────────┐     ┌─────────────────────┐ │
-│ build_waveform   │────→│   led_matrix topic  │ │
-│  - Builds audio  │     │   (42×146 matrix)   │ │
-│  - Saves CSV     │     └──────────┬──────────┘ │
-└────────┬─────────┘                ▼            │
-         │                  ┌──────────────┐     │
-         │ waveform.csv     │    writer    │─────┘
-         ▼                  │  LED sender  │
-┌────────────────────────┐  └──────▲───────┘
-│ yamnet_classification  │         │
-│   - Surveillance (Red) │         │
-│   - Natural (Green)    │─────────┘
-│   - Cultural (Blue)    │  led_paint_commands
-└────────────────────────┘
-         │
-         ▼
-┌──────────────────┐     ┌──────────────┐
-│ classification_  │────→│  web_bridge  │
-│ results topics   │     │   + webapp   │
-└──────────────────┘     └──────────────┘
-```
-
-### Hardware Configuration
-
-**Board 1 - Button Input** (Arduino Uno R3 → `/dev/ttyACM0` @ 9600 baud)
-- Buttons 1-10: Audio composition triggers
-- Button 11: State control (start/stop recording)
-- Sends button numbers over serial
-- USB Chip: ATmega16U2 (CDC ACM)
-
-**Board 2 - LED Matrix** (ESP32 → `/dev/ttyACM1` @ 115200 baud)
-- Controls 42×146 RGB LED matrix (6,132 pixels)
-- Receives matrix updates and paint commands
-- Protocol: Compressed format (position + RGB values)
-- USB: Native USB JTAG/serial debug unit
-
-## ✅ Current Status (March 10, 2026)
-
-### System Status: ✅ **FULLY FUNCTIONAL END-TO-END**
-
-### Hardware & Arduino
-- ✅ **Arduino Uno R3** configured with 4x4 Elegoo membrane keypad
-- ✅ **Button sketch** (`sketches/button_reader/`) uploaded and tested
-- ✅ **ESP32** connected and recognized at `/dev/ttyACM1`
-- ⏳ **ESP32 LED sketch** - Not yet implemented (webapp provides visualization)
-- 🔧 **Keypad layout**:
-  ```
-  1  2  3  a     →  Buttons 1-3 (sound triggers)
-  4  5  6  b     →  Buttons 4-6 (sound triggers)
-  7  8  9  c     →  Buttons 7-9 (sound triggers)
-  *  0  #  d     →  Button 11 (*), Button 10 (0)
-  ```
-
-### Audio System - Barcelona District Sounds
-- ✅ **50 WAV files** - 5 sounds per button (10 Barcelona districts)
-- ✅ **Audio format** - 16kHz mono WAV (YAMNet compatible)
-- ✅ **Conversion tool** - `sounds/convert_audio.py` for batch conversion
-- ✅ **Random selection** - Each button plays random sound from its district
-- ✅ **Web playback** - Browser plays sounds when buttons pressed during recording
-- ✅ **District mapping**:
-  - Button 1: Ciutat Vella | Button 6: Gràcia
-  - Button 2: Eixample | Button 7: Horta-Guinardó
-  - Button 3: Sants-Montjuic | Button 8: Nou Barris
-  - Button 4: Les Corts | Button 9: Sant Andreu
-  - Button 5: Sarrià-St Gervasi | Button 10: Sant Martí
-
-### ROS2 Nodes
-- ✅ **reader** - Fully functional
-  - Publishes to `/arduino_data` (buttons 1-10)
-  - Publishes to `/state_control` (button 11)
-  - Tested with hardware, serial communication working
-- ✅ **build_waveform** - Fully functional with real audio
-  - Loads Barcelona district sounds from `sounds/` folders
-  - Random sound selection per button press
-  - libsndfile integration for WAV loading
-  - Publishes real-time LED matrix data (42×146) at 10 Hz
-  - Saves CSV waveforms to `/tmp/waveform_<timestamp>.csv`
-  - Recording controlled by button 11 via web_bridge state machine
-  - 30-second recording window working correctly
-- ✅ **writer** - Running and sending data
-  - Receiving LED matrix data
-  - Formatting and sending to ESP32 via serial
-  - Compressed format ready for LED hardware
-- ✅ **web_bridge** - Fully functional and integrated
-  - State machine controller (owns state transitions)
-  - WebSocket server broadcasting at 10 Hz
-  - REST API endpoints including `/api/sounds`
-  - Serves webapp at http://localhost:8000
-  - Serves sound files via `/sounds/` static mount
-  - Event loop properly captured for thread-safe broadcasting
-  - Successfully manages full pipeline: welcome → countdown → recording → recording_complete → analyzing → results
-  - Triggers classification after recording completes
-  - Waits for all 3 models before transitioning to results
-- ✅ **yamnet_classification** - **FULLY WORKING**
-  - **Two-stage inference** implemented (audio → YAMNet embeddings → classification heads)
-  - Three parallel nodes: surveillance, natural, cultural
-  - Base YAMNet model (14MB) extracts 1024-dim embeddings
-  - Classification heads process averaged embeddings
-  - Audio resampling (44.1kHz → 16kHz) working correctly
-  - Frame averaging for variable-length audio
-  - Results published to topics: `classification_results_*`
-  - Service interface: `classify_waveform_*`
-  - Tested with real Barcelona district audio
-  - Sample results: Rain (14.9%), Explosion (14.4%), Group Singing (11.6%)
-
-### Webapp (webapp/)
-- ✅ **Frontend** - Fully operational
-  - Real-time waveform visualization (42×146 LED matrix canvas)
-  - Button press indicators (1-10) with visual feedback
-  - **Audio playback** - Plays Barcelona sounds when buttons pressed
-  - Sound mapped to browser HTML5 Audio API
-  - Autoplay restrictions handled (user click required)
-  - **State machine UI** with smooth transitions (all 6 states working)
-  - **Classification results display** - Shows top 5 predictions per model
-  - WebSocket connection stable and receiving updates
-  - Futuristic dark theme with neon effects
-  - Mobile responsive design
-  - Access at: http://localhost:8000
-- ✅ **State Management** - Complete workflow
-  - Welcome screen with connection status
-  - 3-second countdown (3, 2, 1, GO!)
-  - Recording screen with live waveform at 10 Hz
-  - Recording complete summary
-  - **Analyzing screen** with processing animation
-  - **Results screen** with classification data from all 3 models
-  - State transitions synchronized between backend and frontend
-  - Result tracking (waits for all 3 models before showing results)
-- ✅ **Audio Integration** - Fully working
-  - Loads sound mappings on page load from `/api/sounds`
-  - Random sound selection per button
-  - Volume set to 70% by default
-  - Debug logging with emoji markers for troubleshooting
-
-### Test Results (Latest Session - March 10, 2026)
-- ✅ Button presses detected and logged correctly
-- ✅ State control (button 11) triggers recording via web_bridge
-- ✅ **Waveform generation** with real Barcelona district sounds (WAV files)
-- ✅ **Random sound selection** - Different sounds played per button press
-- ✅ **Web audio playback** - Browser plays sounds in real-time
-- ✅ LED matrix data published continuously during recording (6,132 bytes @ 10 Hz)
-- ✅ Webapp receives WebSocket messages and updates in real-time
-- ✅ State machine transitions: welcome → countdown → recording → recording_complete → analyzing → results
-- ✅ 30-second recording completed successfully with button presses
-- ✅ Waveform saved with real audio data (2.95M samples)
-- ✅ **YAMNet classification working end-to-end**
-  - Audio resampling: 44.1kHz → 16kHz (2.95M → 1.07M samples)
-  - Embeddings extracted: [1 frame, 1024 dims] per model
-  - Frame averaging working correctly
-  - All 3 models producing predictions
-  - Results displayed in webapp
-- ⏳ LED hardware display not tested (ESP32 sketch needed)
-
-### Recording Session Example (with Full Classification)
-```
-Button 11 pressed → Countdown (3s) → Recording starts
-  → Button presses: Multiple buttons pressed
-  → Duration: 30 seconds
-  → Waveform: 2,950,977 samples @ 44.1kHz
-  → Resampled: 1,070,649 samples @ 16kHz
-  → YAMNet embeddings: [1 frame, 1024 dims] per model
-  → Classification results:
-    
-    SURVEILLANCE:
-      1. Explosion: 0.1437
-      2. Gunshot, gunfire: 0.1341
-      3. Siren: 0.1143
-      4. Shatter: 0.1117
-      5. Screaming: 0.1101
-    
-    NATURAL:
-      1. Rain: 0.1493
-      2. Rustle: 0.1484
-      3. Ocean: 0.1281
-      4. Animal: 0.1222
-      5. Bird: 0.1128
-    
-    CULTURAL:
-      1. Group Singing: 0.1163
-      2. Drummers: 0.1150
-      3. Fireworks: 0.1133
-      4. Laughing: 0.1090
-      5. Street Vendors: 0.1049
-  
-  → Results displayed in webapp ✅
-```
-
-### Next Steps
-1. ✅ **YAMNet classification** - COMPLETED
-2. **Fine-tune models** with Barcelona-specific training data
-3. **Implement ESP32 LED sketch** (optional - webapp visualization working)
-4. **Deploy to LED matrix hardware** for physical display
-5. **Optimize inference performance** if needed
-
-**Root Causes Identified**:
-
-1. **Sparse Waveform Data by Design**
-   - Location: [build_waveform.cpp](src/cpp_pkg/src/build_waveform.cpp#L220-L245)
-   - Each button press only generates **0.5 seconds of audio** (sine wave)
-   - For a 30-second recording with 27 button presses = 13.5s of actual audio
-   - The remaining 16.5 seconds (55%) are silence (zeros)
-   - **Result**: Waveform is intentionally sparse, not a continuous signal
-
-2. **No Intensity Blending/Accumulation**
-   - Location: [build_waveform.cpp](src/cpp_pkg/src/build_waveform.cpp#L257-L288)
-   - Algorithm maps ~595,000 waveform points to 146 columns (time axis)
-   - Each column receives ~4,077 points, but they all set the SAME pixel to 255
-   - No intensity accumulation or brightness increase for overlapping points
-   - **Result**: Single-pixel-wide lines, no visual thickness or density
-
-3. **No Line Thickness/Antialiasing**
-   - Location: [app.js](webapp/js/app.js#L450-L480)
-   - Rendering draws individual pixels only (1px × 1px)
-   - No neighbor pixels filled for visual continuity
-   - No antialiasing or line smoothing
-   - **Result**: Disconnected dots instead of continuous waveform lines
-
-4. **Binary Pixel Values (ON/OFF Only)**
-   - Pixels are either 0 (black) or 255 (full white)
-   - No grayscale intermediate values to show amplitude density
-   - Multiple sound overlaps don't increase brightness
-   - **Result**: No visual indication of waveform energy or overlap regions
-
-**Expected vs Actual**:
-- **Expected**: Solid, continuous waveform with varying thickness showing audio energy
-- **Actual**: Sparse white pixels scattered across mostly black canvas
-
-**Proposed Fixes** (Priority Order):
-
-1. **Add Waveform Thickness** (High Priority)
-   - Modify `update_led_matrix()` to set neighboring pixels (±1 or ±2 rows)
-   - Creates visible lines instead of single-pixel dots
-   - Minimal computation overhead
-
-2. **Implement Intensity Blending** (Medium Priority)
-   - Instead of `led_matrix_[index] = 255`, use `led_matrix_[index] = min(255, led_matrix_[index] + 64)`
-   - Accumulate brightness where waveform points overlap
-   - Shows energy density and overlapping sounds
-
-3. **Add Envelope Visualization** (Alternative Approach)
-   - Calculate and display amplitude envelope over time
-   - Show running RMS or peak amplitude per time segment
-   - Provides continuous visualization even during silence
-
-4. **Smooth Interpolation** (Low Priority - Performance Cost)
-   - Interpolate between waveform points before mapping to pixels
-   - Creates smoother visual representation
-   - Higher CPU cost, may affect 10 Hz update rate
-
-**Workaround**:
-System is fully functional for audio recording and classification. Visualization issue is cosmetic and doesn't affect core functionality. The waveform CSV file contains correct high-resolution data (595k points).
-
-**Files to Modify**:
-- `src/cpp_pkg/src/build_waveform.cpp` - Add thickness and intensity blending
-- `webapp/js/app.js` - Optional: Add client-side smoothing or interpolation
+Interactive kiosk that lets visitors compose a 30-second audio mix using a 4×4 keypad, then classifies it live with three parallel YAMNet models (surveillance / natural / cultural) and displays results on a React webapp and a 74×75 RGB LED matrix.
 
 ---
 
-## 📦 Package Structure
+## Architecture
+
+```mermaid
+flowchart TD
+    KP["4×4 Keypad\nArduino Uno\n/dev/ttyACM0 @ 9600"]
+    LED["ESP32 LED Matrix\n74×75 px · 5 clusters\n/dev/ttyACM1 @ 115200"]
+
+    RD["reader"]
+    BW["build_waveform\nlibsndfile"]
+    WR["writer"]
+    YS["yamnet_surveillance"]
+    YN["yamnet_natural"]
+    YC["yamnet_cultural"]
+    LLM["llm_node\nClaude API"]
+    WB["web_bridge\nFastAPI :8000"]
+    APP["React webapp\nai-dj-webapp/"]
+
+    KP -->|serial| RD
+    RD -->|/arduino_data| BW
+    RD -->|/nav_data| WB
+
+    BW -->|/led_matrix| WR
+    BW -->|/led_paint_commands| WR
+    BW -->|/pico_waveform| WB
+    WR -->|serial| LED
+
+    BW -->|waveform file| YS
+    BW -->|waveform file| YN
+    BW -->|waveform file| YC
+
+    YS -->|/classification_results_surveillance| LLM
+    YN -->|/classification_results_natural| LLM
+    YC -->|/classification_results_cultural| LLM
+
+    YS -->|/classification_results_surveillance| WB
+    YN -->|/classification_results_natural| WB
+    YC -->|/classification_results_cultural| WB
+    YS -->|/pico_confidence| WB
+    YN -->|/pico_confidence| WB
+    YC -->|/pico_confidence| WB
+
+    LLM -->|/model_results\n/avatar_speech| WB
+
+    WB -->|WebSocket + REST| APP
+```
+
+---
+
+## Hardware
+
+| Board | Port | Baud | Role |
+|-------|------|------|------|
+| Arduino Uno R3 | `/dev/ttyACM0` | 9600 | 4×4 keypad reader |
+| ESP32 | `/dev/ttyACM1` | 115200 | LED matrix driver |
+
+**Keypad layout**
+
+| Key | Serial token | Function |
+|-----|-------------|---------|
+| 1–9 | `PRESS_1`…`PRESS_9` / `RELEASE_n` | Hold-to-play sound buttons |
+| 0 | `PRESS_10` / `RELEASE_10` | Sound button 10 |
+| A | `NAV_A` | Navigate up |
+| B | `NAV_B` | Navigate left |
+| C | `NAV_C` | Navigate right |
+| D | `NAV_D` | Navigate down |
+| `*` | `SELECT` | Confirm / start |
+| `#` | `BACK` | Back / redo |
+
+**LED matrix**: 74 px tall × 75 px wide, arranged in 5 clusters of 74×15. Waveform spans all clusters; classification confidence is colour-coded (surveillance = red, natural = green, cultural = blue).
+
+---
+
+## ROS2 Topics
+
+| Topic | Type | Publisher | Description |
+|-------|------|-----------|-------------|
+| `/arduino_data` | String | reader | `PRESS_n` / `RELEASE_n` events |
+| `/nav_data` | String | reader | `NAV_*`, `SELECT`, `BACK` events |
+| `/state_control` | String | reader | mirrors SELECT for state machine |
+| `/led_matrix` | UInt8MultiArray | build_waveform | 74×75 grayscale waveform (10 Hz) |
+| `/pico_waveform` | Float32MultiArray | build_waveform | normalised waveform for Pico boards |
+| `/pico_confidence` | String | yamnet_classification | per-second confidence scores (JSON) |
+| `/classification_results_{surveillance,natural,cultural}` | String | yamnet_classification | top-5 results per model |
+| `/model_results` | String | llm_node | JSON: model + top3 + Claude sentence |
+| `/avatar_speech` | String | llm_node | plain English sentence |
+| `/led_paint_commands` | String | yamnet_classification | colour overlay commands |
+
+---
+
+## State Machine
+
+```
+welcome → [SELECT] → countdown (3s) → recording (30s) → recording_complete
+recording_complete → [POST /api/classify] → analyzing → [3 models done] → results
+recording_complete → [POST /api/redo]    → countdown  (new round)
+```
+
+---
+
+## Quick Start
+
+### Option A — Docker (Raspberry Pi 5, recommended)
+
+```bash
+# 1. Clone repo and enter directory
+git clone <repo-url> ~/rosnetwork && cd ~/rosnetwork
+
+# 2. Place binary assets (not tracked in git)
+#    models/  ← YAMNet.onnx + surveillance/natural/cultural _head.onnx + *_classes.txt
+#    sounds/  ← 10 folders (one per button) each with WAV files
+
+# 3. Configure secrets
+cp .env.example .env
+nano .env           # set ANTHROPIC_API_KEY
+
+# 4. Build image (~15 min first time on RPi5)
+docker compose build
+
+# 5. Plug in Arduino + ESP32, then start
+docker compose up
+```
+
+Open `http://<rpi5-ip>:8000` in a browser.
+
+Skip the LED matrix writer during testing:
+```bash
+docker compose run --rm ai-dj bash -c \
+  "source /opt/ros/kilted/setup.bash && source install/setup.bash && \
+   ros2 launch cpp_pkg bringup.launch.py with_writer:=false"
+```
+
+---
+
+### Option B — Native dev (desktop / x86)
+
+**Prerequisites**: ROS2 Kilted, ONNX Runtime, Node.js 20, `anthropic` Python package.
+
+```bash
+# Install Python deps
+pip3 install -r requirements.txt --break-system-packages
+
+# Build ROS2 workspace
+source /opt/ros/kilted/setup.bash
+colcon build
+source install/setup.bash
+
+# Build React webapp (first time only)
+cd ai-dj-webapp && npm ci && npm run build && cd ..
+
+# Set API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Terminal 1 — ROS network (no Arduino/ESP32 on desktop)
+ros2 launch cpp_pkg bringup.launch.py with_writer:=false
+
+# Terminal 2 — Webapp dev server (hot reload, proxies to :8000)
+cd ai-dj-webapp && npm run dev
+```
+
+Open `http://localhost:5173`.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key |
+| `CLAUDE_MODEL` | No | `claude-haiku-4-5-20251001` | Model for llm_node |
+| `AI_DJ_WORKSPACE` | No | `~/iaac/ai4all/rosnetwork` | Root path (Docker sets `/ros2_ws`) |
+| `ROS_DOMAIN_ID` | No | `0` | ROS2 domain |
+
+Copy `.env.example` → `.env` and fill in values. `.env` is git-ignored.
+
+---
+
+## Launch Arguments
+
+```bash
+ros2 launch cpp_pkg bringup.launch.py \
+  with_llm:=true       \  # set false to skip Claude node
+  with_writer:=true    \  # set false if no ESP32 connected
+  ws_delay:=8.0        \  # seconds before web_bridge starts
+  llm_delay:=12.0         # seconds before llm_node starts
+```
+
+---
+
+## Node Summary
+
+| Node | Lang | Package | Key deps |
+|------|------|---------|----------|
+| `reader` | C++ | cpp_pkg | Serial `/dev/ttyACM0` |
+| `build_waveform` | C++ | cpp_pkg | libsndfile |
+| `yamnet_classification` ×3 | C++ | cpp_pkg | ONNX Runtime |
+| `writer` | C++ | cpp_pkg | Serial `/dev/ttyACM1` |
+| `web_bridge` | Python | py_pkg | FastAPI, uvicorn, websockets |
+| `llm_node` | Python | py_pkg | anthropic SDK |
+
+---
+
+## Project Structure
 
 ```
 rosnetwork/
-├── rosdep.yaml               # Custom rosdep dependency definitions
-├── requirements.txt          # Python dependencies (use rosdep instead)
 ├── src/
-│   ├── cpp_pkg/              # C++ nodes
+│   ├── cpp_pkg/
 │   │   ├── src/
-│   │   │   ├── reader.cpp                 # Arduino serial reader
-│   │   │   ├── build_waveform.cpp         # Waveform builder + LED matrix
-│   │   │   ├── yamnet_classification.cpp  # YAMNet inference + painting
-│   │   │   ├── writer.cpp                 # LED matrix writer
-│   │   │   └── serial_port.cpp            # Serial utilities
+│   │   │   ├── reader.cpp
+│   │   │   ├── build_waveform.cpp
+│   │   │   ├── yamnet_classification.cpp
+│   │   │   ├── writer.cpp
+│   │   │   └── serial_port.cpp
 │   │   └── launch/
-│   │       └── three_yamnet_models.launch.py
-│   └── py_pkg/               # Python nodes
+│   │       └── bringup.launch.py     ← full system launch
+│   └── py_pkg/
 │       └── py_pkg/
-│           └── web_bridge.py             # Web interface bridge
-├── sketches/                 # Arduino sketches
-│   ├── button_reader/        # Arduino Uno keypad reader (TESTED ✅)
-│   └── README.md             # Arduino setup instructions
-├── models/                   # YAMNet ONNX models
-├── sounds/                   # Button sound files (optional)
-├── webapp/                   # Web visualization interface
-│   ├── index.html            # Main HTML
-│   ├── css/
-│   │   └── style.css         # Futuristic neon theme
-│   ├── js/
-│   │   └── app.js            # WebSocket client & visualization
-│   ├── assets/
-│   │   ├── images/           # Image assets
-│   │   └── fonts/            # Custom fonts
-│   ├── docs/                 # Documentation
-│   ├── package.json          # Node.js manifest
-│   └── README.md             # Webapp documentation
-└── setup_onnxruntime.sh     # ONNX Runtime installer
-
+│           ├── web_bridge.py
+│           └── llm_node.py
+├── ai-dj-webapp/                     ← React 19 + Vite kiosk UI
+├── sketches/
+│   └── button_reader/                ← Arduino firmware
+├── models/                           ← ONNX files (git-ignored)
+├── sounds/                           ← WAV files (git-ignored)
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
+└── requirements.txt
 ```
 
-## 🚀 Quick Start
+---
 
-### 1. Prerequisites
+## Arduino Firmware
 
-```bash
-# ROS2 Humble or later
-sudo apt install ros-humble-desktop
-
-# Build tools
-sudo apt install python3-colcon-common-extensions python3-rosdep
-
-# Initialize rosdep (if not already done)
-sudo rosdep init
-rosdep update
-
-# Install all dependencies using rosdep
-cd ~/iaac/ai4all/rosnetwork
-rosdep install --from-paths src --ignore-src -y
-
-# Optional: Python dependencies for YAMNet model conversion
-pip3 install tensorflow tf2onnx tensorflow-hub
-```
-
-### 2. Install ONNX Runtime
+Upload `sketches/button_reader/button_reader.ino` via Arduino IDE or:
 
 ```bash
-cd ~/Downloads
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-linux-x64-1.24.2.tgz
-tar -xzf onnxruntime-linux-x64-1.24.2.tgz
-
-sudo mkdir -p /opt/onnxruntime
-sudo cp -r onnxruntime-linux-x64-1.24.2/* /opt/onnxruntime/
-sudo ln -sf /opt/onnxruntime/lib/libonnxruntime.so* /usr/local/lib/
-sudo ldconfig
-```
-
-Verify installation:
-```bash
-ldconfig -p | grep onnxruntime
-# Should show: libonnxruntime.so.1.24.2 => /usr/local/lib/...
-```
-
-### 3. Set Up YAMNet Models
-
-```bash
-cd ~/iaac/ai4all/rosnetwork/models
-
-# Create conversion script
-cat > convert_yamnet.py << 'EOF'
-import tensorflow as tf
-import tensorflow_hub as hub
-import tf2onnx
-
-print("Loading YAMNet from TensorFlow Hub...")
-model = hub.load('https://tfhub.dev/google/yamnet/1')
-
-class YAMNetWrapper(tf.Module):
-    def __init__(self, yamnet_model):
-        super(YAMNetWrapper, self).__init__()
-        self.yamnet = yamnet_model
-    
-    @tf.function(input_signature=[tf.TensorSpec(shape=[None], dtype=tf.float32)])
-    def __call__(self, waveform):
-        scores, embeddings, spectrogram = self.yamnet(waveform)
-        return scores
-
-wrapped_model = YAMNetWrapper(model)
-spec = (tf.TensorSpec((None,), tf.float32, name="input"),)
-
-print("Converting to ONNX...")
-model_proto, _ = tf2onnx.convert.from_function(
-    wrapped_model, input_signature=spec, output_path="yamnet.onnx"
-)
-
-# Save class names
-class_names = list(model.class_names().numpy())
-with open('yamnet_class_names.txt', 'w') as f:
-    for name in class_names:
-        f.write(name.decode('utf-8') + '\n')
-
-print(f"✓ Model saved: yamnet.onnx")
-print(f"✓ Classes saved: yamnet_class_names.txt ({len(class_names)} classes)")
-EOF
-
-python3 convert_yamnet.py
-```
-
-### 4. Build and Run
-
-```bash
-cd ~/iaac/ai4all/rosnetwork
-
-# Build
-colcon build --packages-select cpp_pkg py_pkg
-source install/setup.bash
-
-# Verify dependencies are installed
-rosdep check --from-paths src --ignore-src
-
-# Run complete system (separate terminals)
-
-# Terminal 1: Button Input Reader (Arduino Uno)
-ros2 run cpp_pkg reader --ros-args -p port:=/dev/ttyACM0 -p baud_rate:=9600
-
-# Terminal 2: Waveform builder
-ros2 run cpp_pkg build_waveform
-
-# Terminal 3: LED Matrix Writer (ESP32)
-ros2 run cpp_pkg writer --ros-args -p serial_port:=/dev/ttyACM1 -p baud_rate:=115200
-
-# Terminal 4: Web Bridge (for webapp visualization)
-ros2 run py_pkg web_bridge
-
-# Terminal 5-7: YAMNet classifiers (RGB colors)
-ros2 run cpp_pkg yamnet_classification --ros-args -p model_color_r:=255 -p model_color_g:=0 -p model_color_b:=0
-ros2 run cpp_pkg yamnet_classification --ros-args -p model_color_r:=0 -p model_color_g:=255 -p model_color_b:=0
-ros2 run cpp_pkg yamnet_classification --ros-args -p model_color_r:=0 -p model_color_g:=0 -p model_color_b:=255
-
-# Open webapp in browser
-# http://localhost:8000
-```
-
-Or use the launch file for multiple models:
-```bash
-ros2 launch cpp_pkg three_yamnet_models.launch.py
-```
-
-## ✅ Tested Configuration (March 2026)
-
-Successfully tested with minimal setup - no sound files or YAMNet models required:
-
-### Hardware
-- Arduino Uno R3 (ATmega16U2) on `/dev/ttyACM0`
-- Elegoo 4x4 membrane keypad connected to pins 2-9
-- ESP32 (USB JTAG) on `/dev/ttyACM1`
-
-### Arduino Setup
-```bash
-# Install Keypad library
 arduino-cli lib install Keypad
-
-# Compile and upload
-cd sketches/button_reader
-arduino-cli compile --fqbn arduino:avr:uno .
-arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:uno .
+arduino-cli compile --fqbn arduino:avr:uno sketches/button_reader
+arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:uno sketches/button_reader
 ```
 
-### ROS2 System Test
+---
+
+## Troubleshooting
+
+**Serial permission denied**
 ```bash
-# Build
-cd ~/iaac/ai4all/rosnetwork
-colcon build --packages-select cpp_pkg
-source install/setup.bash
-
-# Terminal 1: Reader
-ros2 run cpp_pkg reader
-
-# Terminal 2: Waveform Builder
-ros2 run cpp_pkg build_waveform --ros-args \
-  -p sounds_folder:=/home/salva/iaac/ai4all/rosnetwork/sounds
-
-# Terminal 3: Writer
-ros2 run cpp_pkg writer
+sudo usermod -aG dialout $USER   # log out and back in
 ```
 
-### Test Procedure
-1. Press `*` button → Starts recording (30 seconds)
-2. Press number buttons 0-9 → Generates placeholder sine waves
-3. Wait 30s or press `*` again → Stops recording
-4. Check output: `/tmp/waveform_<timestamp>.csv` (~12 MB, 661k samples)
-
-### Test Results
-- ✅ All buttons detected correctly
-- ✅ Button 11 (*) toggles recording on/off
-- ✅ Placeholder audio generated (220-880 Hz sine waves)
-- ✅ Real-time LED matrix data published to `/led_matrix` topic
-- ✅ CSV waveform saved successfully
-- ✅ Writer sending formatted data to ESP32 serial port
-
-### Topics Active During Test
+**`anthropic` not found in llm_node**
 ```bash
-$ ros2 topic list
-/arduino_data         # Buttons 1-10
-/state_control        # Button 11
-/led_matrix          # 42×146 grayscale waveform
-/led_paint_commands  # Color overlay commands
+pip3 install anthropic --break-system-packages
 ```
 
-## 🎵 Node Descriptions
-
-### reader (Button Input - Arduino Uno)
-Reads button press data from Arduino Uno button board via serial port.
-- **Serial**: `/dev/ttyACM0` @ 9600 baud
-- **Publishes**: 
-  - `arduino_data` (std_msgs/String) - Button numbers 1-10
-  - `state_control` (std_msgs/String) - Button 11 for state control
-- **Parameters**: `port` (/dev/ttyACM0), `baud_rate` (9600)
-
-### build_waveform
-Builds audio waveforms from button presses with Barcelona district sounds and generates LED matrix data.
-- **Subscribes**: `arduino_data`, `state_control`
-- **Publishes**: `led_matrix` (std_msgs/UInt8MultiArray) - 42×146 grayscale waveform
-- **Sound Integration**:
-  - Loads WAV files from district folders (1. Ciutat Vella, 2. Eixample, etc.)
-  - Random sound selection per button (5 sounds per button)
-  - Uses libsndfile for WAV loading
-  - Mixes multiple sounds into single waveform
-- **Features**:
-  - 30-second recording window
-  - Real-time waveform calculation with actual audio samples
-  - CSV export to `/tmp/waveform_<timestamp>.csv`
-  - LED matrix updates every 100ms
-- **Parameters**:
-  - `sounds_folder`: Path to button sound files (default: ~/iaac/ai4all/rosnetwork/sounds)
-  - `recording_duration`: Recording time (default: 30.0s)
-  - `sample_rate`: Audio sample rate (default: 16000)
-  - `matrix_update_rate`: LED refresh rate (default: 0.1s)
-
-### yamnet_classification
-Performs audio classification using YAMNet and highlights relevant time segments.
-- **Input**: Waveform CSV file
-- **Publishes**: 
-  - `classification_results` - Top-5 predictions with scores
-  - `led_paint_commands` - Time segment coloring commands
-- **Features**:
-  - ONNX Runtime inference
-  - Frame-by-frame analysis
-  - Time-segment extraction for top classes
-  - Model-specific RGB color assignment
-- **Parameters**:
-  - `model_path`: ONNX model file
-  - `class_names_path`: Class labels file
-  - `model_name`: Display name
-  - `model_color_r/g/b`: RGB color (0-255)
-  - `input_sample_rate`: Source sample rate (44100)
-  - `yamnet_sample_rate`: Model sample rate (16000)
-
-### writer (LED Matrix - ESP32)
-Sends RGB matrix data to ESP32 LED control board via serial port.
-- **Serial**: `/dev/ttyACM1` @ 115200 baud
-- **Subscribes**:
-  - `led_matrix` - Base waveform data (42×146 grayscale)
-  - `led_paint_commands` - Classification highlights (RGB overlays)
-- **Publishes**: Compressed matrix data to Arduino LED board
-- **Features**:
-  - RGB matrix composition (42×146×3 = 6,132 pixels)
-  - Paint overlay management and re-application
-  - Compressed data format (position + RGB values)
-  - 10 Hz update rate (configurable)
-- **Parameters**:
-  - `serial_port`: LED board port (default: /dev/ttyACM1)
-  - `baud_rate`: Communication speed (default: 115200)
-  - `update_rate`: Matrix refresh interval (default: 0.1s)
-  - Paint overlay management
-  - Serial output formatting (ready for Arduino)
-- **Parameters**:
-  - `serial_port`: Arduino port (default: /dev/ttyACM0)
-  - `update_rate`: Transmission rate (default: 0.1s)
-
-### web_bridge (Python)
-FastAPI WebSocket bridge for real-time web visualization.
-- **Subscribes**: 
-  - `arduino_data` - Button presses 1-10
-  - `state_control` - Button 11 state changes
-  - `led_matrix` - 42×146 waveform data (UInt8MultiArray)
-  - `classification_results_{surveillance,natural,cultural}` - Classification results
-- **Serves**: Web interface at `http://localhost:8000`
-- **Features**:
-  - WebSocket server for real-time updates
-  - REST API endpoints (/api/state, /api/arduino/latest, /api/classifications)
-  - State machine management (welcome → recording → analyzing → results)
-  - Service clients for recording control and classification triggers
-
-## 🌐 Web Interface (webapp)
-
-The web application provides a real-time visualization of the AI DJ system with a futuristic dark theme.
-
-### Features
-- **State Machine UI**: Visual feedback for each system state
-  - Welcome screen with connection status
-  - 3-2-1 countdown before recording
-  - Recording screen with live waveform visualization
-  - Analyzing screen with glitch effects
-  - Results screen with classification data
-- **Real-time Waveform**: 42×146 LED matrix displayed as grayscale canvas
-- **Button Indicators**: Visual feedback for buttons 1-10
-- **Classification Results**: Three model cards - Surveillance (red), Natural (cyan), Cultural (yellow)
-- **WebSocket Updates**: Real-time data streaming at 10 Hz
-- **Mobile Responsive**: Works on tablets and phones
-
-### Webapp Structure
-
-The webapp follows modern web development practices with organized directories:
-
-```
-webapp/
-├── index.html              # Main entry point
-├── css/
-│   └── style.css          # Futuristic neon theme (18KB)
-├── js/
-│   └── app.js             # WebSocket client & visualization (18KB)
-├── assets/
-│   ├── images/            # Image assets (.gitkeep for empty)
-│   └── fonts/             # Custom fonts (.gitkeep for empty)
-├── docs/                  # Documentation (.gitkeep for empty)
-├── package.json           # Node.js manifest (for future npm use)
-├── .gitignore             # Git ignore rules
-└── README.md              # Webapp-specific documentation
-```
-
-**Development-ready**:
-- ✅ Organized folder structure (css/, js/, assets/)
-- ✅ Empty folders preserved with .gitkeep
-- ✅ Package.json for future build tooling
-- ✅ Comprehensive README with API docs
-- ✅ No build process required (served directly by FastAPI)
-
-See [webapp/README.md](webapp/README.md) for detailed development documentation.
-
-### Accessing the Webapp
+**ONNX Runtime not found at build time**
 ```bash
-# Start web_bridge node
-ros2 run py_pkg web_bridge
-
-# Open in browser
-http://localhost:8000
-```
-
-### Webapp Screens
-
-**1. Welcome Screen**
-- "AI DJ" title with neon glow
-- Connection status indicator
-- "Press to start" prompt (Button 11)
-
-**2. Recording Screen** (30 seconds)
-- Recording timer (MM:SS)
-- Spectrum analyzer bars
-- **Live waveform canvas** (42×146 pixels, real-time updates)
-- Button press indicators (1-10)
-
-**3. Analyzing Screen**
-- Glitch text effect: "ANALYZING"
-- Scanning animation
-
-**4. Results Screen**
-- Audio map visualization (button press locations)
-- Three classification model cards:
-  - Surveillance (Red): Top-5 classes with confidence
-  - Natural (Cyan): Top-5 classes with confidence
-  - Cultural (Yellow): Top-5 classes with confidence
-- "New Recording" button to restart
-
-### WebSocket Data
-The webapp receives real-time updates via WebSocket:
-```json
-{
-  "type": "led_matrix",
-  "width": 146,
-  "height": 42,
-  "data": [0, 0, 255, 255, ...],  // Flattened grayscale array
-  "timestamp": 1709812345
-}
-```
-
-## 🎨 LED Matrix Visualization
-
-### Matrix Dimensions
-- **Width**: 146 columns (time axis, 30 seconds)
-- **Height**: 42 rows (amplitude axis, -1.0 to +1.0)
-- **Format**: RGB (3 bytes per pixel)
-
-### Color Scheme
-- **White (255,255,255)**: Base waveform
-- **Red (255,0,0)**: Surveillance model classification segments
-- **Green (0,255,0)**: Natural model classification segments
-- **Blue (0,0,255)**: Cultural model classification segments
-
-### Paint Command Format
-```
-PAINT,<start_time>,<end_time>,<R>,<G>,<B>
-Example: PAINT,2.5,5.0,255,0,0
-```
-
-## 🔧 Configuration
-
-### Sound Files (Optional - Tested without!)
-Place 10 WAV files in `sounds/`:
-```
-sounds/button_1.wav
-sounds/button_2.wav
-...
-sounds/button_10.wav
-```
-**If missing, automatically generates placeholder sine waves:**
-- Button 1: 220 Hz (A3)
-- Button 2: 247 Hz (B3)
-- Button 3: 262 Hz (C4 - Middle C)
-- Button 4: 294 Hz (D4)
-- Button 5: 330 Hz (E4)
-- Button 6: 349 Hz (F4)
-- Button 7: 392 Hz (G4)
-- Button 8: 440 Hz (A4)
-- Button 9: 494 Hz (B4)
-- Button 10: 880 Hz (A5)
-
-This allows **full system testing without any audio files!** ✅
-
-### Multiple Model Setup
-To run different models with different colors:
-```bash
-# Modify launch file or run manually with parameters
-ros2 run cpp_pkg yamnet_classification --ros-args \
-  -p model_path:=./models/surveillance_head.onnx \
-  -p model_name:=Surveillance \
-  -p model_color_r:=255 \
-  -p model_color_g:=100 \
-  -p model_color_b:=0
-```
-
-## 🎓 YAMNet Audio Classes
-
-YAMNet recognizes **521 AudioSet classes**:
-- **Music**: Instruments, genres, musical concepts
-- **Speech**: Conversation, narration, singing
-- **Animals**: Dogs, cats, birds, insects
-- **Nature**: Rain, wind, water, thunder
-- **Human**: Laughter, crying, footsteps
-- **Mechanical**: Engines, alarms, tools, vehicles
-
-Full list in `models/yamnet_class_names.txt` after setup.
-
-## 📊 Data Flow Example
-
-1. **User presses Button 3** → Arduino sends "3"
-2. **reader** publishes to `arduino_data` topic
-3. **build_waveform** loads `sounds/button_3.wav`, adds to waveform matrix
-4. **build_waveform** publishes updated LED matrix every 100ms
-5. **writer** receives matrix, displays on LEDs (white)
-6. After 30s, **build_waveform** saves `/tmp/waveform_1234.csv`
-7. **yamnet_classification** processes waveform, detects "Piano" at 5.2-8.1s
-8. **yamnet_classification** sends paint command: `PAINT,5.2,8.1,255,0,0`
-9. **writer** overlays red color on LED columns 25-39
-10. **web_bridge** displays results in browser
-
-## 🛠️ Troubleshooting
-
-### Serial Port Permission Denied
-The most common issue during testing:
-```bash
-# Permanent fix (requires logout/login):
-sudo usermod -a -G dialout $USER
-# Then log out and back in
-
-# Temporary fix (for current session):
-sudo chmod 666 /dev/ttyACM0
-sudo chmod 666 /dev/ttyACM1
-```
-
-### Both Arduino and ESP32 show as ttyACM (not ttyUSB)
-This is correct for:
-- Arduino Uno R3 (ATmega16U2 USB chip) → `/dev/ttyACM0`
-- ESP32 with native USB JTAG → `/dev/ttyACM1`
-
-Check with:
-```bash
-lsusb
-# Should show:
-# Arduino SA Uno R3 (CDC ACM)
-# Espressif USB JTAG/serial debug unit
-
-ls -l /dev/ttyACM*
-```
-
-### Button 11 not triggering recording
-If button 11 presses don't start/stop recording, check that the reader is stripping carriage returns:
-```bash
-# Check topic data (should show "11", not "11\r"):
-ros2 topic echo /state_control
-
-# If you see "\r", rebuild with latest code
-cd ~/iaac/ai4all/rosnetwork
+# Install to /opt/onnxruntime/ then:
+export CMAKE_PREFIX_PATH=/opt/onnxruntime:$CMAKE_PREFIX_PATH
 colcon build --packages-select cpp_pkg
 ```
 
-### No waveform being built
-Make sure to press button 11 (*) to **start recording** before pressing sound buttons.
-
-### Arduino not detected
+**Simulate button presses without hardware**
 ```bash
-# List serial ports
-ls /dev/ttyUSB* /dev/ttyACM*
-
-# Check which device it is
-lsusb | grep -i arduino
+ros2 topic pub /arduino_data std_msgs/String "data: 'PRESS_3'" --once
+ros2 topic pub /nav_data std_msgs/String "data: 'SELECT'" --once
 ```
 
-### ONNX Runtime not found
-```bash
-# Check installation
-ls /opt/onnxruntime/lib/libonnxruntime.so
-sudo ldconfig
+---
 
-# If still not found, add to LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH
-```
+## Acknowledgements
 
-### Build errors
-```bash
-# Clean build
-cd ~/iaac/ai4all/rosnetwork
-rm -rf build install log
-colcon build --packages-select cpp_pkg --event-handlers console_direct+
-```
-
-### Missing Dependencies
-If you encounter import errors or missing packages:
-```bash
-# Reinstall all dependencies using rosdep
-cd ~/iaac/ai4all/rosnetwork
-rosdep install --from-paths src --ignore-src -y
-
-# Check what's missing
-rosdep check --from-paths src --ignore-src
-
-# If rosdep fails, install manually
-pip3 install fastapi 'uvicorn[standard]' websockets
-```
-
-### Model conversion fails
-```bash
-# Ensure TensorFlow dependencies
-pip3 install --upgrade tensorflow tf2onnx tensorflow-hub
-
-# Check Python version (3.8+ required)
-python3 --version
-```
-
-## 📝 Development Notes
-
-### Adding New Nodes
-1. Create `.cpp` file in `src/cpp_pkg/src/`
-2. Update `CMakeLists.txt` to add executable
-3. Build: `colcon build --packages-select cpp_pkg`
-
-### Testing Individual Nodes
-```bash
-# Test waveform builder without Arduino
-ros2 topic pub /arduino_data std_msgs/String "data: '3'" --once
-
-# Monitor LED matrix output
-ros2 topic echo /led_matrix
-
-# Check paint commands
-ros2 topic echo /led_paint_commands
-```
-
-## LLM Node
-
-The `llm_node` converts YAMNet audio classification results into natural spoken English sentences using the Groq LLM API.
-
-### Get a free Groq API key
-
-1. Go to [console.groq.com](https://console.groq.com)
-2. Sign up for a free account
-3. Navigate to **API Keys** and create a new key
-
-### Set the environment variable
-
-```bash
-export GROQ_API_KEY=your_key_here
-```
-
-Add this line to your `~/.bashrc` to make it permanent.
-
-### Launch the node
-
-```bash
-ros2 run py_pkg llm_node
-```
-
-The node subscribes to `classification_results_surveillance`, `classification_results_natural`, and `classification_results_cultural`, picks the top result from whichever fires, and publishes the LLM response to `/avatar_speech` as a plain string.
-
-## Acknowledgments
-
-- **YAMNet**: Google Research (AudioSet)
-- **ONNX Runtime**: Microsoft
-- **ROS2**: Open Robotics
-
+YAMNet — Google Research / AudioSet · ONNX Runtime — Microsoft · ROS2 — Open Robotics

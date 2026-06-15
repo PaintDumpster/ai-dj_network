@@ -2,13 +2,11 @@ import os
 import re
 import json
 import threading
-import requests
+import anthropic
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-GROQ_MODEL = 'llama-3.1-8b-instant'
 SYSTEM_PROMPT = (
     'You are a voice avatar. Convert audio classification results into a single '
     'warm, natural spoken English sentence. Never mention YAMNet, confidence scores, '
@@ -45,12 +43,15 @@ class LLMNode(Node):
     def __init__(self):
         super().__init__('llm_node')
 
-        self.api_key = os.environ.get('GROQ_API_KEY')
+        self.api_key = os.environ.get('ANTHROPIC_API_KEY')
         if not self.api_key:
             self.get_logger().error(
-                'GROQ_API_KEY environment variable is not set. '
+                'ANTHROPIC_API_KEY environment variable is not set. '
                 'The node will publish the fallback message for every input.'
             )
+            self.client = None
+        else:
+            self.client = anthropic.Anthropic(api_key=self.api_key)
 
         for topic in (
             'classification_results_surveillance',
@@ -62,10 +63,10 @@ class LLMNode(Node):
         self.avatar_pub = self.create_publisher(String, '/avatar_speech', 10)
         self.results_pub = self.create_publisher(String, '/model_results', 10)
 
-        self.get_logger().info('LLM Node initialized')
+        self.get_logger().info('LLM Node initialized (Claude API)')
 
     def _classification_callback(self, msg):
-        """Receive a classification result, parse it, call Groq in a thread."""
+        """Receive a classification result, parse it, call Claude in a thread."""
         parsed = parse_results(msg.data)
         if parsed is None:
             self.get_logger().warn('Could not parse classification result message')
@@ -75,21 +76,19 @@ class LLMNode(Node):
         self.get_logger().info(f'[{model_name}] Top result: {label} ({confidence:.2f})')
 
         threading.Thread(
-            target=self._call_groq_and_publish,
+            target=self._call_claude_and_publish,
             args=(model_name, label, confidence, top3),
             daemon=True
         ).start()
 
-    def _call_groq_and_publish(self, model_name, label, confidence, top3):
-        """Call the Groq API and publish combined result (runs in a background thread)."""
-        sentence = self._call_groq(label, confidence)
+    def _call_claude_and_publish(self, model_name, label, confidence, top3):
+        """Call the Claude API and publish combined result (runs in a background thread)."""
+        sentence = self._call_claude(label, confidence)
 
-        # Publish plain sentence to /avatar_speech (existing behaviour)
         out = String()
         out.data = sentence
         self.avatar_pub.publish(out)
 
-        # Publish combined JSON to /model_results
         combined = String()
         combined.data = json.dumps({
             'model': model_name,
@@ -100,41 +99,29 @@ class LLMNode(Node):
 
         self.get_logger().info(f'[{model_name}] {sentence}')
 
-    def _call_groq(self, label, confidence):
-        """Make the HTTP request to Groq. Returns the LLM text or the fallback."""
-        if not self.api_key:
+    def _call_claude(self, label, confidence):
+        """Call the Anthropic Messages API. Returns the LLM text or the fallback."""
+        if not self.client:
             return FALLBACK_MESSAGE
 
-        body = {
-            'model': GROQ_MODEL,
-            'messages': [
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': f'Audio label: {label}. Confidence: {confidence:.2f}.'},
-            ],
-            'max_tokens': 80,
-            'temperature': 0.7,
-        }
-
+        model = os.environ.get('CLAUDE_MODEL', 'claude-haiku-4-5-20251001')
         try:
-            resp = requests.post(
-                GROQ_API_URL,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json',
-                },
-                json=body,
-                timeout=5,
+            msg = self.client.messages.create(
+                model=model,
+                max_tokens=80,
+                system=SYSTEM_PROMPT,
+                messages=[{
+                    'role': 'user',
+                    'content': f'Audio label: {label}. Confidence: {confidence:.2f}.',
+                }],
             )
-            if not resp.ok:
-                self.get_logger().error(f'Groq API error {resp.status_code}: {resp.text}')
-            resp.raise_for_status()
-            return resp.json()['choices'][0]['message']['content'].strip()
-        except requests.exceptions.Timeout:
-            self.get_logger().warn('Groq API request timed out')
-        except requests.exceptions.RequestException as e:
-            self.get_logger().error(f'Groq API request failed: {e}')
-        except (KeyError, IndexError, ValueError) as e:
-            self.get_logger().error(f'Unexpected Groq API response format: {e}')
+            return msg.content[0].text.strip()
+        except anthropic.APITimeoutError:
+            self.get_logger().warn('Claude API request timed out')
+        except anthropic.APIError as e:
+            self.get_logger().error(f'Claude API error: {e}')
+        except (IndexError, AttributeError) as e:
+            self.get_logger().error(f'Unexpected Claude response format: {e}')
 
         return FALLBACK_MESSAGE
 

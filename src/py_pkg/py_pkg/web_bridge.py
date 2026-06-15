@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String, UInt8MultiArray
@@ -10,13 +10,10 @@ import asyncio
 import uvicorn
 import threading
 import json
-from typing import List
 import os
-import base64
 
 app = FastAPI(title="ROS2 Web Bridge")
 
-# CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,39 +22,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Store connected WebSocket clients
+
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
+            except Exception:
                 pass
 
-manager = ConnectionManager()
 
-# Global event loop for async operations
+manager = ConnectionManager()
 event_loop = None
+
 
 @app.on_event("startup")
 async def capture_event_loop():
-    """Capture the running event loop when FastAPI starts"""
     global event_loop
     event_loop = asyncio.get_running_loop()
-    print(f"Event loop captured: {event_loop}")
+
 
 def schedule_broadcast(data):
-    """Thread-safe way to schedule broadcast on event loop"""
     if event_loop and manager.active_connections:
         try:
             asyncio.run_coroutine_threadsafe(manager.broadcast(data), event_loop)
@@ -68,415 +64,305 @@ def schedule_broadcast(data):
 class WebBridgeNode(Node):
     def __init__(self):
         super().__init__('web_bridge')
-        
-        # Application state machine
-        self.state = "welcome"  # States: welcome, ready, recording, analyzing, results
+
+        # States: welcome → countdown → recording → recording_complete → analyzing → results
+        self.state = "welcome"
         self.recording_start_time = None
-        self.waveform_file = None
-        
-        # Timer references for one-shot timers
         self.countdown_timer = None
         self.recording_timer = None
-        
-        # Store latest data
+
         self.arduino_data = []
         self.led_matrix_data = None
-        self.waveform_status = {"recording": False, "duration": 0}
         self.classification_results = {
-            "surveillance": [],
-            "natural": [],
-            "cultural": []
+            "surveillance": None,
+            "natural": None,
+            "cultural": None,
         }
-        
-        # Subscribe to state control (button 11)
-        self.state_control_sub = self.create_subscription(
-            String,
-            'state_control',
-            self.state_control_callback,
-            10
-        )
-        
-        # Subscribe to Arduino data (buttons 1-10)
-        self.arduino_sub = self.create_subscription(
-            String,
-            'arduino_data',
-            self.arduino_callback,
-            10
-        )
-        
-        # Subscribe to LED matrix updates (42x146 grayscale waveform)
-        self.led_matrix_sub = self.create_subscription(
-            UInt8MultiArray,
-            'led_matrix',
-            self.led_matrix_callback,
-            10
-        )
-        
-        # Subscribe to classification results from 3 models
-        self.classification_sub_surveillance = self.create_subscription(
-            String,
-            'classification_results_surveillance',
-            lambda msg: self.classification_callback(msg, 'surveillance'),
-            10
-        )
-        
-        self.classification_sub_natural = self.create_subscription(
-            String,
-            'classification_results_natural',
-            lambda msg: self.classification_callback(msg, 'natural'),
-            10
-        )
-        
-        self.classification_sub_cultural = self.create_subscription(
-            String,
-            'classification_results_cultural',
-            lambda msg: self.classification_callback(msg, 'cultural'),
-            10
-        )
-        
-        # Service clients for controlling other nodes
-        self.start_recording_client = self.create_client(Trigger, 'start_recording')
-        self.stop_recording_client = self.create_client(Trigger, 'stop_recording')
-        
-        # Clients for YAMNet classification services (names match three_yamnet_models.launch.py)
-        self.classify_surveillance_client = self.create_client(Trigger, 'classify_waveform_surveillance')
-        self.classify_natural_client = self.create_client(Trigger, 'classify_waveform_natural')
-        self.classify_cultural_client = self.create_client(Trigger, 'classify_waveform_cultural')
-        
+        self.received_model_count = 0
+
+        # ── Subscriptions ────────────────────────────────────────────
+        self.create_subscription(String, 'state_control', self.state_control_callback, 10)
+        self.create_subscription(String, 'arduino_data',  self.arduino_callback,       10)
+        self.create_subscription(String, 'nav_data',      self.nav_callback,            10)
+        self.create_subscription(UInt8MultiArray, 'led_matrix', self.led_matrix_callback, 10)
+
+        for model in ('surveillance', 'natural', 'cultural'):
+            self.create_subscription(
+                String,
+                f'classification_results_{model}',
+                lambda msg, m=model: self.classification_callback(msg, m),
+                10,
+            )
+
+        # Optional LLM results
+        self.create_subscription(String, 'model_results', self.llm_callback, 10)
+
+        # ── Service clients ──────────────────────────────────────────
+        self.start_recording_client  = self.create_client(Trigger, 'start_recording')
+        self.stop_recording_client   = self.create_client(Trigger, 'stop_recording')
+        self.classify_clients = {
+            'surveillance': self.create_client(Trigger, 'classify_waveform_surveillance'),
+            'natural':      self.create_client(Trigger, 'classify_waveform_natural'),
+            'cultural':     self.create_client(Trigger, 'classify_waveform_cultural'),
+        }
+
         self.get_logger().info('Web Bridge Node initialized')
-    
-    def state_control_callback(self, msg):
-        """Handle button 11 press for state transitions"""
-        self.get_logger().info(f'State control pressed. Current state: {self.state}')
-        
-        if self.state == "welcome" or self.state == "ready":
-            # Single press starts countdown immediately
-            self.state = "countdown"
-            self.broadcast_state_change()
-            # Start countdown timer (3 seconds) - one-shot
-            if self.countdown_timer:
-                self.countdown_timer.cancel()
-            self.countdown_timer = self.create_timer(3.0, self._countdown_complete)
-        elif self.state == "recording_complete":
-            self.state = "analyzing"
-            self.broadcast_state_change()
-            # Trigger classification on all 3 YAMNet models
-            self.trigger_classification()
-        
-    def _countdown_complete(self):
-        """Called once after 3-second countdown - cancels timer immediately"""
-        if self.countdown_timer:
-            self.countdown_timer.cancel()
-            self.countdown_timer = None
-        self.start_recording()
-    
-    def start_recording(self):
-        """Called after countdown completes"""
-        self.state = "recording"
-        self.recording_start_time = self.get_clock().now()
-        self.broadcast_state_change()
-        
-        # Call service to start recording on build_waveform node
-        self.call_start_recording_service()
-        
-        # Start 30-second recording timer - one-shot
-        if self.recording_timer:
-            self.recording_timer.cancel()
-        self.recording_timer = self.create_timer(30.0, self._recording_complete)
-    
-    def _recording_complete(self):
-        """Called once after 30-second recording - cancels timer immediately"""
-        if self.recording_timer:
-            self.recording_timer.cancel()
-            self.recording_timer = None
-        self.complete_recording()
-    
-    def complete_recording(self):
-        """Called after 30 seconds of recording"""
-        # Call service to stop recording
-        self.call_stop_recording_service()
-        
-        self.state = "recording_complete"
-        self.broadcast_state_change()
-    
-    def broadcast_state_change(self):
-        """Broadcast state change to all connected clients"""
+
+    # ── State helpers ────────────────────────────────────────────────
+
+    def broadcast_state(self):
         data = {
             "type": "state_change",
             "state": self.state,
-            "timestamp": self.get_clock().now().to_msg().sec
+            "timestamp": self.get_clock().now().to_msg().sec,
         }
         schedule_broadcast(data)
-        self.get_logger().info(f'State changed to: {self.state}')
-    
-    def call_start_recording_service(self):
-        """Call service to start recording on build_waveform node"""
-        if not self.start_recording_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().warn('start_recording service not available')
-            return
-        
-        request = Trigger.Request()
-        future = self.start_recording_client.call_async(request)
-        future.add_done_callback(self.start_recording_response_callback)
-    
-    def start_recording_response_callback(self, future):
-        try:
-            response = future.result()
-            if response.success:
-                self.get_logger().info(f'Recording started: {response.message}')
-            else:
-                self.get_logger().warn(f'Failed to start recording: {response.message}')
-        except Exception as e:
-            self.get_logger().error(f'Service call failed: {e}')
-    
-    def call_stop_recording_service(self):
-        """Call service to stop recording on build_waveform node"""
-        if not self.stop_recording_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().warn('stop_recording service not available')
-            return
-        
-        request = Trigger.Request()
-        future = self.stop_recording_client.call_async(request)
-        future.add_done_callback(self.stop_recording_response_callback)
-    
-    def stop_recording_response_callback(self, future):
-        try:
-            response = future.result()
-            if response.success:
-                self.get_logger().info(f'Recording stopped: {response.message}')
-                # Extract waveform file from response if available
-                self.waveform_file = response.message
-            else:
-                self.get_logger().warn(f'Failed to stop recording: {response.message}')
-        except Exception as e:
-            self.get_logger().error(f'Service call failed: {e}')
-    
+        self.get_logger().info(f'State → {self.state}')
+
+    def _cancel_timer(self, attr):
+        t = getattr(self, attr, None)
+        if t:
+            t.cancel()
+            setattr(self, attr, None)
+
+    # ── State transitions ────────────────────────────────────────────
+
+    def start_countdown(self):
+        self._cancel_timer('countdown_timer')
+        self._cancel_timer('recording_timer')
+        self.received_model_count = 0
+        self.classification_results = {"surveillance": None, "natural": None, "cultural": None}
+        self.state = "countdown"
+        self.broadcast_state()
+        self.countdown_timer = self.create_timer(3.0, self._countdown_done)
+
+    def _countdown_done(self):
+        self._cancel_timer('countdown_timer')
+        self.state = "recording"
+        self.recording_start_time = self.get_clock().now()
+        self.broadcast_state()
+        self._call_service(self.start_recording_client, "start_recording")
+        self.recording_timer = self.create_timer(30.0, self._recording_done)
+
+    def _recording_done(self):
+        self._cancel_timer('recording_timer')
+        self._call_service(self.stop_recording_client, "stop_recording")
+        self.state = "recording_complete"
+        self.broadcast_state()
+
     def trigger_classification(self):
-        """Trigger classification on all 3 YAMNet models"""
-        self.get_logger().info('Triggering classification on all models')
-        
-        # Call classification service for each model
-        for client, model_name in [
-            (self.classify_surveillance_client, 'Surveillance'),
-            (self.classify_natural_client, 'Natural'),
-            (self.classify_cultural_client, 'Cultural')
-        ]:
-            if not client.wait_for_service(timeout_sec=1.0):
-                self.get_logger().warn(f'Classification service for {model_name} not available')
-                continue
-            
-            request = Trigger.Request()
-            future = client.call_async(request)
-            future.add_done_callback(
-                lambda f, name=model_name: self.classification_service_callback(f, name)
-            )
-    
-    def classification_service_callback(self, future, model_name):
-        try:
-            response = future.result()
-            if response.success:
-                self.get_logger().info(f'{model_name} classification: {response.message}')
-            else:
-                self.get_logger().warn(f'{model_name} classification failed: {response.message}')
-        except Exception as e:
-            self.get_logger().error(f'{model_name} service call failed: {e}')
-    
-    def led_matrix_callback(self, msg):
-        """Handle LED matrix updates (42x146 grayscale waveform)"""
-        # Store raw matrix data
-        self.led_matrix_data = list(msg.data)
-        
-        # Parse matrix dimensions from layout field or use defaults
-        height = msg.layout.dim[0].size if msg.layout.dim else 42
-        width = msg.layout.dim[1].size if len(msg.layout.dim) > 1 else 146
-        
-        # Prepare data for web client
-        data = {
-            "type": "led_matrix",
-            "width": width,
-            "height": height,
-            "data": self.led_matrix_data,  # Flattened array
-            "timestamp": self.get_clock().now().to_msg().sec
-        }
-        schedule_broadcast(data)
-        self.get_logger().info(f'LED matrix update: {len(self.led_matrix_data)} bytes')
-    
+        self.state = "analyzing"
+        self.broadcast_state()
+        for name, client in self.classify_clients.items():
+            self._call_service(client, f"classify_waveform_{name}")
+
+    def redo_recording(self):
+        """Skip welcome — go straight to a fresh countdown."""
+        self._call_service(self.stop_recording_client, "stop_recording")
+        self.start_countdown()
+
+    # ── Subscription callbacks ────────────────────────────────────────
+
+    def state_control_callback(self, msg):
+        """SELECT button from hardware. Starts countdown from welcome/ready.
+        recording_complete → handled via REST endpoints only (webapp decides yes/no)."""
+        self.get_logger().info(f'state_control received, current state: {self.state}')
+        if self.state in ("welcome", "ready"):
+            self.start_countdown()
+        # In recording_complete: the webapp calls /api/classify or /api/redo instead.
+
     def arduino_callback(self, msg):
-        """Handle Arduino button press data (buttons 1-10)"""
-        # Only process button presses during recording state
-        if self.state != "recording":
-            return
-            
+        """PRESS_n / RELEASE_n events — always forwarded to webapp."""
         data = {
             "type": "arduino",
             "button": msg.data,
-            "timestamp": self.get_clock().now().to_msg().sec
+            "timestamp": self.get_clock().now().to_msg().sec,
         }
         self.arduino_data.append(data)
-        
-        # Keep only last 100 events
         if len(self.arduino_data) > 100:
             self.arduino_data.pop(0)
-        
-        # Broadcast to all connected clients
         schedule_broadcast(data)
-        self.get_logger().info(f'Arduino data: {msg.data}')
-    
+
+    def nav_callback(self, msg):
+        """NAV_A/B/C/D, SELECT, BACK events."""
+        schedule_broadcast({"type": "nav", "button": msg.data})
+
+    def led_matrix_callback(self, msg):
+        self.led_matrix_data = list(msg.data)
+        height = msg.layout.dim[0].size if msg.layout.dim else 42
+        width  = msg.layout.dim[1].size if len(msg.layout.dim) > 1 else 146
+        schedule_broadcast({
+            "type": "led_matrix",
+            "width": width,
+            "height": height,
+            "data": self.led_matrix_data,
+            "timestamp": self.get_clock().now().to_msg().sec,
+        })
+
     def classification_callback(self, msg, model_name):
-        """Handle classification results from YAMNet models"""
-        data = {
+        self.classification_results[model_name] = msg.data
+        self.received_model_count += 1
+        schedule_broadcast({
             "type": "classification",
             "model": model_name,
             "results": msg.data,
-            "timestamp": self.get_clock().now().to_msg().sec
-        }
-        self.classification_results[model_name].append(data)
-        
-        # Keep only last 10 results per model
-        if len(self.classification_results[model_name]) > 10:
-            self.classification_results[model_name].pop(0)
-        
-        # Broadcast to all connected clients
-        schedule_broadcast(data)
-        self.get_logger().info(f'Classification from {model_name}')
+            "timestamp": self.get_clock().now().to_msg().sec,
+        })
+        # Auto-transition to results once all 3 models have responded
+        if self.received_model_count >= 3 and self.state == "analyzing":
+            self.state = "results"
+            self.broadcast_state()
+
+    def llm_callback(self, msg):
+        schedule_broadcast({"type": "llm_result", "data": msg.data})
+
+    # ── Service caller ───────────────────────────────────────────────
+
+    def _call_service(self, client, name):
+        if not client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn(f'Service {name} not available')
+            return
+        future = client.call_async(Trigger.Request())
+        future.add_done_callback(lambda f: self._service_done(f, name))
+
+    def _service_done(self, future, name):
+        try:
+            resp = future.result()
+            if resp.success:
+                self.get_logger().info(f'{name}: {resp.message}')
+            else:
+                self.get_logger().warn(f'{name} failed: {resp.message}')
+        except Exception as e:
+            self.get_logger().error(f'{name} error: {e}')
 
 
-# Global node instance
+# ── Global node ───────────────────────────────────────────────────────
 bridge_node = None
 
 
-# REST API Endpoints
+# ── REST endpoints ────────────────────────────────────────────────────
+
 @app.get("/api/status")
-async def api_root():
+async def api_status():
     return {"message": "ROS2 Web Bridge API", "status": "running"}
+
+
+@app.get("/api/state")
+async def get_state():
+    if bridge_node:
+        return {"state": bridge_node.state, "recording_active": bridge_node.state == "recording"}
+    return {"state": "unknown", "recording_active": False}
+
+
+@app.post("/api/classify")
+async def api_classify():
+    """Webapp calls this when user confirms YES at the recording_complete prompt."""
+    if bridge_node and bridge_node.state == "recording_complete":
+        bridge_node.trigger_classification()
+        return {"ok": True, "state": bridge_node.state}
+    return JSONResponse(status_code=400, content={"error": "not in recording_complete state"})
+
+
+@app.post("/api/redo")
+async def api_redo():
+    """Webapp calls this when user confirms NO — restarts directly to countdown."""
+    if bridge_node and bridge_node.state == "recording_complete":
+        bridge_node.redo_recording()
+        return {"ok": True, "state": bridge_node.state}
+    return JSONResponse(status_code=400, content={"error": "not in recording_complete state"})
 
 
 @app.get("/api/arduino/latest")
 async def get_latest_arduino():
-    """Get latest Arduino button presses"""
     if bridge_node:
         return {"data": bridge_node.arduino_data[-10:]}
     return {"data": []}
 
 
-@app.get("/api/state")
-async def get_state():
-    """Get current application state"""
-    if bridge_node:
-        return {
-            "state": bridge_node.state,
-            "recording_active": bridge_node.state == "recording"
-        }
-    return {"state": "unknown", "recording_active": False}
-
-
 @app.get("/api/classifications")
 async def get_classifications():
-    """Get all classification results from 3 models"""
     if bridge_node:
-        return {
-            "surveillance": bridge_node.classification_results["surveillance"],
-            "natural": bridge_node.classification_results["natural"],
-            "cultural": bridge_node.classification_results["cultural"]
-        }
-    return {"surveillance": [], "natural": [], "cultural": []}
-
-
-@app.get("/api/classifications/{model_name}")
-async def get_model_classifications(model_name: str):
-    """Get classification results for a specific model"""
-    if bridge_node and model_name in bridge_node.classification_results:
-        return {"data": bridge_node.classification_results[model_name]}
-    return {"data": []}
+        return bridge_node.classification_results
+    return {"surveillance": None, "natural": None, "cultural": None}
 
 
 @app.get("/api/sounds")
 async def get_sound_files():
-    """Get available sound files for each button/district"""
     sounds_mapping = {}
-    
-    # Find sounds directory
     sounds_paths = [
         os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
         "/home/salva/iaac/ai4all/rosnetwork/sounds",
-        os.path.join(os.path.dirname(__file__), "../../../sounds"),
     ]
-    
-    sounds_base = None
-    for path in sounds_paths:
-        if os.path.exists(path):
-            sounds_base = path
-            break
-    
+    sounds_base = next((p for p in sounds_paths if os.path.exists(p)), None)
     if sounds_base:
-        # Scan subdirectories for WAV files
-        # Directories are named like "1. Ciutat Vella", "2. Eixample", etc.
         for button_num in range(1, 11):
-            # Look for directory starting with button number
-            button_dirs = [d for d in os.listdir(sounds_base) 
-                          if d.startswith(f"{button_num}. ") and os.path.isdir(os.path.join(sounds_base, d))]
-            
+            button_dirs = [
+                d for d in os.listdir(sounds_base)
+                if d.startswith(f"{button_num}. ") and os.path.isdir(os.path.join(sounds_base, d))
+            ]
             if button_dirs:
                 subdir = os.path.join(sounds_base, button_dirs[0])
                 wav_files = [f for f in os.listdir(subdir) if f.endswith('.wav')]
-                # Use URL-encoded path for directory with spaces
                 dir_name = button_dirs[0].replace(' ', '%20')
                 sounds_mapping[str(button_num)] = [
                     f"/sounds/{dir_name}/{f.replace(' ', '%20')}" for f in wav_files
                 ]
-    
     return {"sounds": sounds_mapping}
 
 
+# ── WebSocket ─────────────────────────────────────────────────────────
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates"""
     await manager.connect(websocket)
+    # Send current state immediately on connect
+    if bridge_node:
+        await websocket.send_json({
+            "type": "state_change",
+            "state": bridge_node.state,
+            "timestamp": 0,
+        })
     try:
         while True:
-            # Keep connection alive
-            data = await websocket.receive_text()
-            # Echo back for ping/pong
-            await websocket.send_text(f"Echo: {data}")
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
-# Serve static files (sounds folder first)
+# ── Static files ──────────────────────────────────────────────────────
+
 sounds_paths = [
     os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
     "/home/salva/iaac/ai4all/rosnetwork/sounds",
-    os.path.join(os.path.dirname(__file__), "../../../sounds"),
 ]
-
-for sounds_path in sounds_paths:
-    if os.path.exists(sounds_path):
-        app.mount("/sounds", StaticFiles(directory=sounds_path), name="sounds")
-        print(f"Serving sounds from: {sounds_path}")
+for sp in sounds_paths:
+    if os.path.exists(sp):
+        app.mount("/sounds", StaticFiles(directory=sp), name="sounds")
+        print(f"Serving sounds from: {sp}")
         break
 else:
     print("Warning: sounds directory not found!")
 
-# Serve static files (webapp folder)
-# Try multiple possible paths
+# Serve built React app (production). During dev, Vite dev server proxies to :8000.
 webapp_paths = [
+    os.path.expanduser("~/iaac/ai4all/rosnetwork/ai-dj-webapp/dist"),
+    "/home/salva/iaac/ai4all/rosnetwork/ai-dj-webapp/dist",
+    # Legacy fallback
     os.path.expanduser("~/iaac/ai4all/rosnetwork/webapp"),
     "/home/salva/iaac/ai4all/rosnetwork/webapp",
-    os.path.join(os.path.dirname(__file__), "../../../webapp"),
 ]
-
-for webapp_path in webapp_paths:
-    if os.path.exists(webapp_path):
-        # Mount static files at root for direct access to index.html, css/, js/, etc.
-        app.mount("/", StaticFiles(directory=webapp_path, html=True), name="webapp")
-        print(f"Serving webapp from: {webapp_path}")
+for wp in webapp_paths:
+    if os.path.exists(wp):
+        app.mount("/", StaticFiles(directory=wp, html=True), name="webapp")
+        print(f"Serving webapp from: {wp}")
         break
 else:
     print("Warning: webapp directory not found!")
 
 
+# ── Entry point ───────────────────────────────────────────────────────
+
 def run_ros_node():
-    """Run ROS2 node in separate thread"""
     global bridge_node
     rclpy.init()
     bridge_node = WebBridgeNode()
@@ -485,19 +371,9 @@ def run_ros_node():
 
 
 def main():
-    """Main entry point"""
-    # Start ROS2 node in background thread
     ros_thread = threading.Thread(target=run_ros_node, daemon=True)
     ros_thread.start()
-    
-    # Start FastAPI server (uvicorn creates its own event loop)
-    # The event loop will be captured in the startup event handler
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 
 if __name__ == "__main__":

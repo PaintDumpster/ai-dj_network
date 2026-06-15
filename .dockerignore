@@ -1,0 +1,25 @@
+.git/
+.env
+
+# ROS2 local build artifacts
+build/
+install/
+log/
+
+# Node.js
+ai-dj-webapp/node_modules/
+ai-dj-webapp/dist/
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Dev / docs
+*.md
+sketches/
+webapp/
+test_audio_input.py
+ROSDEP_SETUP.md

@@ -1,25 +1,24 @@
-# ROS2 Workspace - Generated Directories
+# ── ROS2 build artifacts ──────────────────────────────────────────────────────
 build/
 install/
 log/
 devel/
+COLCON_IGNORE
 
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 *.egg
 *.egg-info/
-dist/
 .eggs/
 .venv/
 venv/
 
-# C++
+# ── C++ ───────────────────────────────────────────────────────────────────────
 *.o
 *.a
-*.so
 *.dylib
 *.exe
 *.out
@@ -30,38 +29,43 @@ Makefile
 CTestTestfile.cmake
 *.cmake
 
-# IDE - VS Code (optional - comment out if you want to share settings)
-.vscode/
-*.code-workspace
+# ── Node / React webapp ───────────────────────────────────────────────────────
+node_modules/
+ai-dj-webapp/node_modules/
+ai-dj-webapp/dist/
 
-# IDE - Other
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
 
-# ROS2 specific
+# ── Models (large binaries — place manually, not tracked) ────────────────────
+models/*.onnx
+models/*.tar.gz
+models/*.zip
+models/*.h5
+models/*.pb
+models/yamnet_savedmodel/
+models/.venv/
+models/venv/
+
+# ── Audio samples (large binaries — place manually, not tracked) ─────────────
+*.wav
+*.mp3
+*.m4a
+
+# ── ROS2 bag files ────────────────────────────────────────────────────────────
 *.bag
 *.db3
 *.db3-shm
 *.db3-wal
 
-# Models - Ignore large binary files
-models/*.onnx
-models/.venv/
-models/venv/
-models/yamnet_savedmodel/
-models/*.tar.gz
-models/*.zip
-models/*.h5
-models/*.pb
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+.idea/
+*.swp
+*.swo
+*~
 
-# Audio files
-*.wav
-*.mp3
-*.m4a
-
-# Ignore colcon generated files
-COLCON_IGNORE
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

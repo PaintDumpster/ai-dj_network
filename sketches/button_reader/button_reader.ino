@@ -1,25 +1,22 @@
 /*
  * AI DJ Button Reader - Arduino Uno
- * 
- * Reads a 4x4 matrix keypad and sends button presses over serial
- * - Buttons 0-9: Sound triggers (sent as 1-10)
- * - Button *: State control (sent as 11)
- * - Buttons a,b,c,d,#: Ignored
- * 
+ *
+ * Sound buttons (1-9, 0→10): send PRESS_n on press, RELEASE_n on release.
+ *   Holding a button will report as active; releasing cuts the sound.
+ * Nav buttons  (A=up, B=left, C=right, D=down): send NAV_X once on press.
+ * Control keys (*=SELECT, #=BACK): send SELECT / BACK once on press.
+ *
  * Hardware:
- * - Arduino Uno on /dev/ttyACM0
- * - 4x4 Matrix Keypad
- * - Row pins: 9, 8, 7, 6
- * - Column pins: 5, 4, 3, 2
+ *   Arduino Uno on /dev/ttyACM0 @ 9600 baud
+ *   4x4 Matrix Keypad
+ *   Row pins: 9, 8, 7, 6 — Column pins: 5, 4, 3, 2
  */
 
 #include <Keypad.h>
 
-// Keypad configuration
 const byte ROWS = 4;
 const byte COLS = 4;
 
-// Keypad layout
 char keys[ROWS][COLS] = {
   {'1','2','3','a'},
   {'4','5','6','b'},
@@ -27,47 +24,69 @@ char keys[ROWS][COLS] = {
   {'*','0','#','d'}
 };
 
-// Pin connections (adjust if needed)
-byte rowPins[ROWS] = {9, 8, 7, 6};    // Connect to row pins of keypad
-byte colPins[COLS] = {5, 4, 3, 2};    // Connect to column pins of keypad
+byte rowPins[ROWS] = {9, 8, 7, 6};
+byte colPins[COLS] = {5, 4, 3, 2};
 
-// Create keypad object
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-void setup() {
-  // Initialize serial at 9600 baud (matches ROS2 reader node)
-  Serial.begin(9600);
-  
-  // Wait for serial port to connect
-  while (!Serial) {
-    ; // Wait for serial port
+// Return the button number string for sound keys (1-9 → "1"-"9", 0 → "10")
+const char* soundIndex(char key) {
+  switch (key) {
+    case '1': return "1";
+    case '2': return "2";
+    case '3': return "3";
+    case '4': return "4";
+    case '5': return "5";
+    case '6': return "6";
+    case '7': return "7";
+    case '8': return "8";
+    case '9': return "9";
+    case '0': return "10";
+    default:  return nullptr;
   }
-  
+}
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial) { ; }
+  // Allow multi-key detection
+  keypad.setDebounceTime(50);
+  keypad.setHoldTime(200);
   Serial.println("Arduino Button Reader Ready");
-  Serial.println("Layout: 1-9,0 = sounds, * = state control");
 }
 
 void loop() {
-  // Read keypad
-  char key = keypad.getKey();
-  
-  if (key) {
-    // Map button to command
-    if (key >= '1' && key <= '9') {
-      // Buttons 1-9 (already numbered correctly)
-      Serial.println(key);
+  if (!keypad.getKeys()) return;
+
+  for (int i = 0; i < LIST_MAX; i++) {
+    Key& k = keypad.key[i];
+    if (!k.stateChanged) continue;
+
+    char key = k.kchar;
+
+    // ── Sound buttons (hold-sensitive) ──────────────────────────────
+    const char* idx = soundIndex(key);
+    if (idx != nullptr) {
+      if (k.kstate == PRESSED || k.kstate == HOLD) {
+        Serial.print("PRESS_");
+        Serial.println(idx);
+      } else if (k.kstate == RELEASED) {
+        Serial.print("RELEASE_");
+        Serial.println(idx);
+      }
+      continue;
     }
-    else if (key == '0') {
-      // Button 0 -> send as "10"
-      Serial.println("10");
+
+    // ── Nav buttons (one-shot on PRESSED) ───────────────────────────
+    if (k.kstate != PRESSED) continue;
+
+    switch (key) {
+      case 'a': Serial.println("NAV_A"); break;   // up
+      case 'b': Serial.println("NAV_B"); break;   // left
+      case 'c': Serial.println("NAV_C"); break;   // right
+      case 'd': Serial.println("NAV_D"); break;   // down
+      case '*': Serial.println("SELECT"); break;
+      case '#': Serial.println("BACK");  break;
     }
-    else if (key == '*') {
-      // State control button -> send as "11"
-      Serial.println("11");
-    }
-    // Ignore a, b, c, d, # buttons
-    
-    // Small delay to debounce
-    delay(50);
   }
 }

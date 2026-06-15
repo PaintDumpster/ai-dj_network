@@ -1,0 +1,16 @@
+services:
+  ai-dj:
+    build: .
+    image: ai-dj:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0   # Arduino Uno — keypad input
+      - /dev/ttyACM1:/dev/ttyACM1   # ESP32 — LED matrix output
+    volumes:
+      - ./models:/ros2_ws/models:ro   # ONNX model files (read-only)
+      - ./sounds:/ros2_ws/sounds:ro   # Audio sample files (read-only)
+    # host networking is required for ROS2 DDS multicast (UDP discovery)
+    network_mode: host
