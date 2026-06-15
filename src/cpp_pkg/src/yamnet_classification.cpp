@@ -57,9 +57,12 @@ public:
         // Publisher for LED paint commands
         paint_pub_ = this->create_publisher<std_msgs::msg::String>("led_paint_commands", 10);
 
-        // Publisher for Pico board 2 — per-second confidence scores (JSON string)
-        // Each message: {"model":"surveillance","color":[R,G,B],"per_second":[{"second":0,"scores":{...}},...]}
-        pico_confidence_publisher_ = this->create_publisher<std_msgs::msg::String>("pico_confidence", 10);
+        // Per-second confidence scores split by Pico board:
+        //   pico_confidence_1 → seconds covering clusters 1-3 (Pico 1, ~18 s)
+        //   pico_confidence_2 → seconds covering clusters 4-5 (Pico 2, ~12 s)
+        // Each message: {"model":"...","color":[R,G,B],"per_second":[{"second":N,"scores":{...}},...]}
+        pico_confidence_pub_1_ = this->create_publisher<std_msgs::msg::String>("pico_confidence_1", 10);
+        pico_confidence_pub_2_ = this->create_publisher<std_msgs::msg::String>("pico_confidence_2", 10);
         
         // Service for triggering classification
         classify_service_ = this->create_service<std_srvs::srv::Trigger>(
@@ -599,61 +602,75 @@ private:
     
     void publish_pico_confidence()
     {
-        // Aggregate per-frame predictions (~0.096s each) into 1-second bins.
-        // Publishes JSON string to /pico_confidence for Pico board color-coding.
+        // Aggregate per-frame predictions (~0.096 s each) into 1-second bins,
+        // then split between the two Pico boards by time:
+        //   Pico 1 — clusters 1-3 → first  3/5 of total seconds (~18 s for 30 s recording)
+        //   Pico 2 — clusters 4-5 → last   2/5 of total seconds (~12 s)
         const double frame_duration = 0.096;
         const size_t num_classes = class_names_.size();
         if (frame_predictions_.empty() || num_classes == 0) return;
 
         double total_duration = frame_predictions_.size() * frame_duration;
-        int total_seconds = static_cast<int>(std::ceil(total_duration));
+        int total_seconds     = static_cast<int>(std::ceil(total_duration));
 
-        std::string json = "{";
-        json += "\"model\":\"" + model_name_ + "\",";
-        json += "\"color\":[" + std::to_string(model_color_r_) + "," +
-                                std::to_string(model_color_g_) + "," +
-                                std::to_string(model_color_b_) + "],";
-        json += "\"per_second\":[";
+        // Boundary: Pico 1 takes the first 3 clusters out of 5
+        int pico1_seconds = (total_seconds * 3 + 4) / 5;  // ceiling of 3/5 * total
 
-        for (int sec = 0; sec < total_seconds; sec++) {
-            // Collect frames that fall within this second
+        std::string color_str = "[" + std::to_string(model_color_r_) + "," +
+                                      std::to_string(model_color_g_) + "," +
+                                      std::to_string(model_color_b_) + "]";
+        std::string header = "{\"model\":\"" + model_name_ + "\","
+                             "\"color\":" + color_str + ","
+                             "\"per_second\":[";
+
+        // Build per-second JSON entries
+        auto second_json = [&](int sec) -> std::string {
             size_t frame_start = static_cast<size_t>(sec / frame_duration);
             size_t frame_end   = static_cast<size_t>((sec + 1) / frame_duration);
             frame_end = std::min(frame_end, frame_predictions_.size());
 
-            // Average scores per class across frames in this second
-            std::vector<double> avg_scores(num_classes, 0.0);
+            std::vector<double> avg(num_classes, 0.0);
             size_t count = 0;
             for (size_t f = frame_start; f < frame_end; f++) {
                 for (const auto& pred : frame_predictions_[f]) {
-                    if (pred.first >= 0 && static_cast<size_t>(pred.first) < num_classes) {
-                        avg_scores[pred.first] += pred.second;
-                    }
+                    if (pred.first >= 0 && static_cast<size_t>(pred.first) < num_classes)
+                        avg[pred.first] += pred.second;
                 }
                 count++;
             }
-            if (count > 0) {
-                for (auto& s : avg_scores) s /= count;
-            }
+            if (count > 0) for (auto& s : avg) s /= count;
 
-            if (sec > 0) json += ",";
-            json += "{\"second\":" + std::to_string(sec) + ",\"scores\":{";
+            std::string entry = "{\"second\":" + std::to_string(sec) + ",\"scores\":{";
             for (size_t c = 0; c < num_classes; c++) {
-                if (c > 0) json += ",";
-                // Escape class name (simple)
-                std::string name = class_names_[c];
-                json += "\"" + name + "\":" + std::to_string(static_cast<float>(avg_scores[c]));
+                if (c > 0) entry += ",";
+                entry += "\"" + class_names_[c] + "\":" + std::to_string(static_cast<float>(avg[c]));
             }
-            json += "}}";
+            return entry + "}}";
+        };
+
+        // Pico 1 message (seconds 0 .. pico1_seconds-1)
+        std::string json1 = header;
+        for (int s = 0; s < pico1_seconds; s++) {
+            if (s > 0) json1 += ",";
+            json1 += second_json(s);
         }
+        json1 += "]}";
 
-        json += "]}";
+        // Pico 2 message (seconds pico1_seconds .. total_seconds-1)
+        std::string json2 = header;
+        for (int s = pico1_seconds; s < total_seconds; s++) {
+            if (s > pico1_seconds) json2 += ",";
+            json2 += second_json(s);
+        }
+        json2 += "]}";
 
-        auto msg = std_msgs::msg::String();
-        msg.data = json;
-        pico_confidence_publisher_->publish(msg);
-        RCLCPP_INFO(this->get_logger(), "Published pico_confidence for %s (%d seconds)",
-                    model_name_.c_str(), total_seconds);
+        auto msg1 = std_msgs::msg::String(); msg1.data = json1;
+        auto msg2 = std_msgs::msg::String(); msg2.data = json2;
+        pico_confidence_pub_1_->publish(msg1);
+        pico_confidence_pub_2_->publish(msg2);
+        RCLCPP_INFO(this->get_logger(),
+                    "Published pico_confidence_1/2 for %s (Pico1: 0-%ds, Pico2: %d-%ds)",
+                    model_name_.c_str(), pico1_seconds - 1, pico1_seconds, total_seconds - 1);
     }
 
     void send_paint_command(double start_time, double end_time)
@@ -711,7 +728,8 @@ private:
     // ROS objects
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr classification_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr paint_pub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pico_confidence_publisher_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pico_confidence_pub_1_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pico_confidence_pub_2_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr classify_service_;
 };

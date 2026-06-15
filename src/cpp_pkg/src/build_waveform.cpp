@@ -51,10 +51,11 @@ public:
         // Publisher for LED matrix data (74×75 full matrix, grayscale uint8)
         matrix_publisher_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("led_matrix", 10);
 
-        // Publisher for Pico boards — normalized waveform shape (float32, 74×75)
-        // Published once when stop_recording is called; Pico uses this to render the waveform.
-        // A separate /pico_confidence topic carries the per-second scores for color-coding.
-        pico_waveform_publisher_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("pico_waveform", 10);
+        // Pico 1 (clusters 1-3, cols 0-44): normalized waveform submatrix (74×45)
+        // Pico 2 (clusters 4-5, cols 45-74): normalized waveform submatrix (74×30)
+        // Both published once when stop_recording is called.
+        pico_waveform_pub_1_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("pico_waveform_1", 10);
+        pico_waveform_pub_2_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("pico_waveform_2", 10);
         
         // Timer to periodically publish matrix updates
         matrix_timer_ = this->create_wall_timer(
@@ -410,24 +411,40 @@ private:
     
     void publish_pico_waveform()
     {
-        // Normalize the uint8 LED matrix (0-255) to float32 (0.0-1.0) and publish
-        auto msg = std_msgs::msg::Float32MultiArray();
-        msg.layout.dim.resize(2);
-        msg.layout.dim[0].label = "height";
-        msg.layout.dim[0].size = matrix_height_;
-        msg.layout.dim[0].stride = matrix_height_ * matrix_width_;
-        msg.layout.dim[1].label = "width";
-        msg.layout.dim[1].size = matrix_width_;
-        msg.layout.dim[1].stride = matrix_width_;
+        // Split the 74×75 matrix column-wise between two Pico boards:
+        //   Pico 1 — clusters 1-3 → columns 0..44  (74×45, covers ~18 s)
+        //   Pico 2 — clusters 4-5 → columns 45..74 (74×30, covers ~12 s)
+        static constexpr int CLUSTER_COLS = 15;
+        static constexpr int PICO1_COLS   = 3 * CLUSTER_COLS;  // 45
+        static constexpr int PICO2_COLS   = 2 * CLUSTER_COLS;  // 30
 
-        msg.data.resize(led_matrix_.size());
-        for (size_t i = 0; i < led_matrix_.size(); i++) {
-            msg.data[i] = led_matrix_[i] / 255.0f;
-        }
+        auto make_msg = [&](int col_start, int col_count) {
+            auto msg = std_msgs::msg::Float32MultiArray();
+            msg.layout.dim.resize(2);
+            msg.layout.dim[0].label  = "height";
+            msg.layout.dim[0].size   = matrix_height_;
+            msg.layout.dim[0].stride = matrix_height_ * col_count;
+            msg.layout.dim[1].label  = "width";
+            msg.layout.dim[1].size   = col_count;
+            msg.layout.dim[1].stride = col_count;
+            msg.data.reserve(matrix_height_ * col_count);
+            for (int row = 0; row < matrix_height_; row++) {
+                for (int col = col_start; col < col_start + col_count; col++) {
+                    msg.data.push_back(led_matrix_[row * matrix_width_ + col] / 255.0f);
+                }
+            }
+            return msg;
+        };
 
-        pico_waveform_publisher_->publish(msg);
-        RCLCPP_INFO(this->get_logger(), "Published pico_waveform: %zu floats (%dx%d)",
-                    msg.data.size(), matrix_height_, matrix_width_);
+        auto msg1 = make_msg(0, PICO1_COLS);
+        pico_waveform_pub_1_->publish(msg1);
+        RCLCPP_INFO(this->get_logger(), "Published pico_waveform_1: %zu floats (%dx%d)",
+                    msg1.data.size(), matrix_height_, PICO1_COLS);
+
+        auto msg2 = make_msg(PICO1_COLS, PICO2_COLS);
+        pico_waveform_pub_2_->publish(msg2);
+        RCLCPP_INFO(this->get_logger(), "Published pico_waveform_2: %zu floats (%dx%d)",
+                    msg2.data.size(), matrix_height_, PICO2_COLS);
     }
 
     void save_waveform()
@@ -460,7 +477,8 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr state_control_subscription_;
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr matrix_publisher_;
-    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pico_waveform_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pico_waveform_pub_1_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pico_waveform_pub_2_;
     rclcpp::TimerBase::SharedPtr matrix_timer_;
     
     // Services

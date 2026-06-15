@@ -9,11 +9,11 @@ Interactive kiosk that lets visitors compose a 30-second audio mix using a 4×4 
 ```mermaid
 flowchart TD
     KP["4×4 Keypad\nArduino Uno\n/dev/ttyACM0 @ 9600"]
-    LED["ESP32 LED Matrix\n74×75 px · 5 clusters\n/dev/ttyACM1 @ 115200"]
+    P1["Pico 1\n/dev/ttyACM1\nclusters 1-2-3 · 74×45 px"]
+    P2["Pico 2\n/dev/ttyACM2\nclusters 4-5 · 74×30 px"]
 
     RD["reader"]
     BW["build_waveform\nlibsndfile"]
-    WR["writer"]
     YS["yamnet_surveillance"]
     YN["yamnet_natural"]
     YC["yamnet_cultural"]
@@ -25,10 +25,8 @@ flowchart TD
     RD -->|/arduino_data| BW
     RD -->|/nav_data| WB
 
-    BW -->|/led_matrix| WR
-    BW -->|/led_paint_commands| WR
-    BW -->|/pico_waveform| WB
-    WR -->|serial| LED
+    BW -->|/pico_waveform_1| P1
+    BW -->|/pico_waveform_2| P2
 
     BW -->|waveform file| YS
     BW -->|waveform file| YN
@@ -41,9 +39,13 @@ flowchart TD
     YS -->|/classification_results_surveillance| WB
     YN -->|/classification_results_natural| WB
     YC -->|/classification_results_cultural| WB
-    YS -->|/pico_confidence| WB
-    YN -->|/pico_confidence| WB
-    YC -->|/pico_confidence| WB
+
+    YS -->|/pico_confidence_1| P1
+    YN -->|/pico_confidence_1| P1
+    YC -->|/pico_confidence_1| P1
+    YS -->|/pico_confidence_2| P2
+    YN -->|/pico_confidence_2| P2
+    YC -->|/pico_confidence_2| P2
 
     LLM -->|/model_results\n/avatar_speech| WB
 
@@ -57,7 +59,8 @@ flowchart TD
 | Board | Port | Baud | Role |
 |-------|------|------|------|
 | Arduino Uno R3 | `/dev/ttyACM0` | 9600 | 4×4 keypad reader |
-| ESP32 | `/dev/ttyACM1` | 115200 | LED matrix driver |
+| RPi Pico 1 | `/dev/ttyACM1` | TBD | LED clusters 1-3 |
+| RPi Pico 2 | `/dev/ttyACM2` | TBD | LED clusters 4-5 |
 
 **Keypad layout**
 
@@ -72,7 +75,12 @@ flowchart TD
 | `*` | `SELECT` | Confirm / start |
 | `#` | `BACK` | Back / redo |
 
-**LED matrix**: 74 px tall × 75 px wide, arranged in 5 clusters of 74×15. Waveform spans all clusters; classification confidence is colour-coded (surveillance = red, natural = green, cultural = blue).
+**LED matrix**: 74 px tall × 75 px wide, arranged in 5 clusters of 74×15. Two RPi Pico microcontrollers drive it:
+
+- **Pico 1** — clusters 1, 2, 3 → columns 0–44 (74×45 px, ~18 s of audio)
+- **Pico 2** — clusters 4, 5 → columns 45–74 (74×30 px, ~12 s of audio)
+
+The waveform spans all clusters; classification confidence is colour-coded across both Picos (surveillance = red, natural = green, cultural = blue).
 
 ---
 
@@ -84,8 +92,10 @@ flowchart TD
 | `/nav_data` | String | reader | `NAV_*`, `SELECT`, `BACK` events |
 | `/state_control` | String | reader | mirrors SELECT for state machine |
 | `/led_matrix` | UInt8MultiArray | build_waveform | 74×75 grayscale waveform (10 Hz) |
-| `/pico_waveform` | Float32MultiArray | build_waveform | normalised waveform for Pico boards |
-| `/pico_confidence` | String | yamnet_classification | per-second confidence scores (JSON) |
+| `/pico_waveform_1` | Float32MultiArray | build_waveform | normalised waveform — Pico 1 (74×45, clusters 1-3) |
+| `/pico_waveform_2` | Float32MultiArray | build_waveform | normalised waveform — Pico 2 (74×30, clusters 4-5) |
+| `/pico_confidence_1` | String | yamnet_classification | per-second confidence JSON — Pico 1 (~18 s) |
+| `/pico_confidence_2` | String | yamnet_classification | per-second confidence JSON — Pico 2 (~12 s) |
 | `/classification_results_{surveillance,natural,cultural}` | String | yamnet_classification | top-5 results per model |
 | `/model_results` | String | llm_node | JSON: model + top3 + Claude sentence |
 | `/avatar_speech` | String | llm_node | plain English sentence |
@@ -122,7 +132,7 @@ nano .env           # set ANTHROPIC_API_KEY
 # 4. Build image (~15 min first time on RPi5)
 docker compose build
 
-# 5. Plug in Arduino + ESP32, then start
+# 5. Plug in Arduino + both Picos, then start
 docker compose up
 ```
 
@@ -156,7 +166,7 @@ cd ai-dj-webapp && npm ci && npm run build && cd ..
 # Set API key
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Terminal 1 — ROS network (no Arduino/ESP32 on desktop)
+# Terminal 1 — ROS network (no hardware connected on desktop)
 ros2 launch cpp_pkg bringup.launch.py with_writer:=false
 
 # Terminal 2 — Webapp dev server (hot reload, proxies to :8000)
@@ -185,7 +195,7 @@ Copy `.env.example` → `.env` and fill in values. `.env` is git-ignored.
 ```bash
 ros2 launch cpp_pkg bringup.launch.py \
   with_llm:=true       \  # set false to skip Claude node
-  with_writer:=true    \  # set false if no ESP32 connected
+  with_writer:=false   \  # enable when Pico serial writers are implemented
   ws_delay:=8.0        \  # seconds before web_bridge starts
   llm_delay:=12.0         # seconds before llm_node starts
 ```
@@ -199,7 +209,7 @@ ros2 launch cpp_pkg bringup.launch.py \
 | `reader` | C++ | cpp_pkg | Serial `/dev/ttyACM0` |
 | `build_waveform` | C++ | cpp_pkg | libsndfile |
 | `yamnet_classification` ×3 | C++ | cpp_pkg | ONNX Runtime |
-| `writer` | C++ | cpp_pkg | Serial `/dev/ttyACM1` |
+| `writer` | C++ | cpp_pkg | Serial — placeholder for future Pico writers |
 | `web_bridge` | Python | py_pkg | FastAPI, uvicorn, websockets |
 | `llm_node` | Python | py_pkg | anthropic SDK |
 

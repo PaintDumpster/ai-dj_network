@@ -9,7 +9,7 @@ Startup order
 
 Arguments
   with_llm   (default true)  — set to false to skip the LLM node
-  with_writer(default true)  — set to false if no ESP32/LED matrix is connected
+  with_writer(default false) — set to true when Pico serial writers are connected
   ws_delay   (default 8.0)   — seconds to wait before starting web_bridge;
                                 increase if yamnet ONNX loading is slow on your hardware
 """
@@ -39,8 +39,8 @@ def generate_launch_description():
     )
     arg_with_writer = DeclareLaunchArgument(
         'with_writer',
-        default_value='true',
-        description='Start the LED matrix writer node (requires ESP32 on /dev/ttyACM1)',
+        default_value='false',
+        description='Start the LED matrix writer node (requires Pico serial connections)',
     )
     arg_ws_delay = DeclareLaunchArgument(
         'ws_delay',
