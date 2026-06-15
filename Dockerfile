@@ -46,6 +46,10 @@ RUN python3 -m venv /opt/venv --system-site-packages && \
     /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
 ENV PATH="/opt/venv/bin:$PATH"
+# Colcon-generated entry scripts use a hardcoded #!/usr/bin/python3 shebang,
+# so PATH ordering doesn't help. Add the venv's site-packages to PYTHONPATH
+# so the system Python binary also finds fastapi, anthropic, etc.
+ENV PYTHONPATH="/opt/venv/lib/python3.12/site-packages:${PYTHONPATH:-}"
 
 COPY --from=ros-builder /opt/onnxruntime /opt/onnxruntime
 COPY --from=ros-builder /ros2_ws/install /ros2_ws/install
