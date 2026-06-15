@@ -59,8 +59,8 @@ flowchart TD
 | Board | Port | Baud | Role |
 |-------|------|------|------|
 | Arduino Uno R3 | `/dev/ttyACM0` | 9600 | 4×4 keypad reader |
-| RPi Pico 1 | `/dev/ttyACM1` | TBD | LED clusters 1-3 |
-| RPi Pico 2 | `/dev/ttyACM2` | TBD | LED clusters 4-5 |
+| RPi Pico 1 | `/dev/ttyACM1` | 115200 | LED clusters 1-3 (GP9, GP11, GP12) |
+| RPi Pico 2 | `/dev/ttyACM2` | 115200 | LED clusters 4-5 (GP11, GP12) |
 
 **Keypad layout**
 
@@ -235,7 +235,11 @@ rosnetwork/
 │           └── llm_node.py
 ├── ai-dj-webapp/                     ← React 19 + Vite kiosk UI
 ├── sketches/
-│   └── button_reader/                ← Arduino firmware
+│   ├── button_reader/                ← Arduino Uno firmware (4×4 keypad)
+│   └── matrix_display/
+│       ├── pico1_matrix.ino          ← Pico 1 firmware (clusters 1-3, cols 0-44)
+│       ├── pico2_matrix.ino          ← Pico 2 firmware (clusters 4-5, cols 45-74)
+│       └── zone1_02.ino              ← Hardware test sketch (standalone)
 ├── models/                           ← ONNX files (git-ignored)
 ├── sounds/                           ← WAV files (git-ignored)
 ├── Dockerfile
