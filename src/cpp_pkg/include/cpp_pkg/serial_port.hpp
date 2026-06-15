@@ -1,6 +1,8 @@
 #ifndef CPP_PKG_SERIAL_PORT_HPP
 #define CPP_PKG_SERIAL_PORT_HPP
 
+#include <cstdint>
+#include <cstddef>
 #include <string>
 
 class SerialPort

@@ -28,7 +28,7 @@ WORKDIR /ros2_ws
 COPY src/ src/
 RUN . /opt/ros/kilted/setup.sh && \
     CMAKE_PREFIX_PATH="/opt/onnxruntime:${CMAKE_PREFIX_PATH:-}" \
-    colcon build --symlink-install
+    colcon build || { echo "colcon build FAILED"; exit 1; }
 
 # ── Stage 3: Runtime image ────────────────────────────────────────────────────
 FROM ros:kilted-ros-base-noble AS runtime
