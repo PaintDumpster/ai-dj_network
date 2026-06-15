@@ -97,6 +97,9 @@ class WebBridgeNode(Node):
         # Optional LLM results
         self.create_subscription(String, 'model_results', self.llm_callback, 10)
 
+        # ── Publishers ───────────────────────────────────────────────
+        self.colorize_pub = self.create_publisher(String, 'colorize_command', 10)
+
         # ── Service clients ──────────────────────────────────────────
         self.start_recording_client  = self.create_client(Trigger, 'start_recording')
         self.stop_recording_client   = self.create_client(Trigger, 'stop_recording')
@@ -270,6 +273,20 @@ async def api_redo():
         bridge_node.redo_recording()
         return {"ok": True, "state": bridge_node.state}
     return JSONResponse(status_code=400, content={"error": "not in recording_complete state"})
+
+
+@app.post("/api/colorize")
+async def api_colorize(body: dict):
+    """Webapp calls this when an agent card is expanded or collapsed.
+    body: {"model": "surveillance"|"natural"|"cultural"|""}
+    Empty model string reverts the LED matrix to white waveform."""
+    model = body.get("model", "")
+    if bridge_node:
+        msg = String()
+        msg.data = model
+        bridge_node.colorize_pub.publish(msg)
+        return {"ok": True, "model": model}
+    return JSONResponse(status_code=503, content={"error": "node not ready"})
 
 
 @app.get("/api/arduino/latest")

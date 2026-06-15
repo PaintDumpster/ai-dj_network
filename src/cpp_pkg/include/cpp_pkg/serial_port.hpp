@@ -11,6 +11,7 @@ class SerialPort
 
         std::string readline();
         void writeline(const std::string& data);
+        void write_bytes(const uint8_t* data, size_t len);
 
     private:
         int fd_;

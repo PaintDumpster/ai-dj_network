@@ -67,3 +67,8 @@ void SerialPort::writeline(const std::string& data)
 {
     ::write(fd_, data.c_str(), data.length());
 }
+
+void SerialPort::write_bytes(const uint8_t* data, size_t len)
+{
+    ::write(fd_, data, len);
+}

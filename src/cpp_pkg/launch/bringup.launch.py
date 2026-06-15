@@ -85,13 +85,34 @@ def generate_launch_description():
         }],
     )
 
-    node_writer = Node(
+    node_writer_1 = Node(
         package='cpp_pkg',
         executable='writer',
-        name='led_writer',
+        name='led_writer_1',
         output='screen',
         emulate_tty=True,
         condition=IfCondition(with_writer),
+        parameters=[{
+            'serial_port':   '/dev/ttyACM1',
+            'pico_id':       1,
+            'n_cols':        45,
+            'global_offset': 0,
+        }],
+    )
+
+    node_writer_2 = Node(
+        package='cpp_pkg',
+        executable='writer',
+        name='led_writer_2',
+        output='screen',
+        emulate_tty=True,
+        condition=IfCondition(with_writer),
+        parameters=[{
+            'serial_port':   '/dev/ttyACM2',
+            'pico_id':       2,
+            'n_cols':        30,
+            'global_offset': 45,
+        }],
     )
 
     # ── Group 2 (t=0) — YAMNet classifiers (ONNX loading takes several seconds) ─
@@ -181,10 +202,11 @@ def generate_launch_description():
         arg_llm_delay,
 
         # t = 0 — hardware I/O + waveform builder
-        LogInfo(msg='[bringup] Starting reader, waveform builder, writer…'),
+        LogInfo(msg='[bringup] Starting reader, waveform builder, writers…'),
         node_reader,
         node_build_waveform,
-        node_writer,
+        node_writer_1,
+        node_writer_2,
 
         # t = 0 — YAMNet classifiers (load ONNX models in parallel)
         LogInfo(msg='[bringup] Starting YAMNet classifiers (surveillance / natural / cultural)…'),
