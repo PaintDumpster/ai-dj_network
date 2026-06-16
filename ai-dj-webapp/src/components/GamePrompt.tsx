@@ -16,15 +16,27 @@ export default function GamePrompt({ lastNav, onClassify, onRedo }: Props) {
     gsap.to(boxRef.current, { opacity: 1, y: 0, duration: 0.4, ease: 'power3.out' });
   }, []);
 
-  // Handle nav events
+  // Handle nav events (hardware) and arrow keys (keyboard fallback)
   useEffect(() => {
     if (!lastNav) return;
-    if (lastNav === 'NAV_C') setSelected('yes');   // right → YES
-    if (lastNav === 'NAV_B') setSelected('no');    // left  → NO
+    if (lastNav === 'NAV_C') setSelected('yes');
+    if (lastNav === 'NAV_B') setSelected('no');
     if (lastNav === 'SELECT') {
       selected === 'yes' ? onClassify() : onRedo();
     }
   }, [lastNav, selected, onClassify, onRedo]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'ArrowRight') setSelected('yes');
+      if (e.code === 'ArrowLeft')  setSelected('no');
+      if (e.code === 'Enter') {
+        setSelected(s => { s === 'yes' ? onClassify() : onRedo(); return s; });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClassify, onRedo]);
 
   return (
     <div className="game-prompt-overlay">

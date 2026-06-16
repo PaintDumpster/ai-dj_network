@@ -1,6 +1,8 @@
 # AI DJ — Audio Bias Pavilion
 
-Interactive kiosk that lets visitors compose a 30-second audio mix using a 4×4 keypad, then classifies it live with three parallel YAMNet models (surveillance / natural / cultural) and displays results on a React webapp and a 74×75 RGB LED matrix.
+Interactive kiosk that lets visitors compose an audio mix using a 4×4 keypad, then classifies it live with three parallel YAMNet models (surveillance / natural / cultural) and displays results on a React webapp and a 74×75 RGB LED matrix. Each model is voiced by a named AI persona — Vigil, Flora, and Ludo — who narrate what they hear in character.
+
+> **Recording length isn't fixed at 30s.** The keypad window is open for 30 seconds, but each button press queues the *full, untrimmed* sound effect — pressing several buttons back to back can chain well past 30s of actual audio (90+ seconds is common). `yamnet_classification` classifies the entire mix, not just the first second of it.
 
 ---
 
@@ -84,6 +86,23 @@ The waveform spans all clusters; classification confidence is colour-coded acros
 
 ---
 
+## Agent Personas
+
+Each YAMNet model is paired with a named persona that `llm_node` voices via the Claude API. The webapp shows each persona's avatar (`ai-dj-webapp/public/svgs/avatar_*.svg`) collapsed to just an icon + generated line; expanding a card reveals the model description and the raw top-5 detections.
+
+| Persona | Model | Color | Voice |
+|---------|-------|-------|-------|
+| **Vigil** | surveillance | red | Watchful security AI — urgent, gives safety advice on danger sounds |
+| **Flora** | natural | green | Calm AI tuned to the natural world — soothing, observational |
+| **Ludo** | cultural | blue | Exuberant AI for city culture/community life — lively, inviting |
+
+`llm_node` builds each persona's description from two derived signals, not just the raw top-5:
+
+- **Confidence calibration** — scores are raw multi-label detector outputs over ~9-10 classes, so chance alone puts unrelated labels around 0.10-0.15. The prompt explicitly scales tone to the number (>0.5 confident, 0.25-0.5 hedged, <0.25 "nothing notable") so noise-level detections don't get narrated as confirmed events.
+- **Relative timeline** — `yamnet_classification` buckets the whole recording into a `Timeline:` section (3s windows). `llm_node` collapses that into three relative phases (early/middle/late) before it reaches the model — never raw seconds, since clip length varies (see the recording-length note above) and literal timestamps read as fabricated.
+
+---
+
 ## ROS2 Topics
 
 | Topic | Type | Publisher | Description |
@@ -96,7 +115,7 @@ The waveform spans all clusters; classification confidence is colour-coded acros
 | `/pico_waveform_2` | Float32MultiArray | build_waveform | normalised waveform — Pico 2 (74×30, clusters 4-5) |
 | `/pico_confidence_1` | String | yamnet_classification | per-second confidence JSON — Pico 1 (~18 s) |
 | `/pico_confidence_2` | String | yamnet_classification | per-second confidence JSON — Pico 2 (~12 s) |
-| `/classification_results_{surveillance,natural,cultural}` | String | yamnet_classification | top-5 results per model |
+| `/classification_results_{surveillance,natural,cultural}` | String | yamnet_classification | top-5 results + time-bucketed `Timeline:` section per model |
 | `/model_results` | String | llm_node | JSON: model + top3 + Claude sentence |
 | `/avatar_speech` | String | llm_node | plain English sentence |
 | `/led_paint_commands` | String | yamnet_classification | colour overlay commands |
@@ -208,10 +227,10 @@ ros2 launch cpp_pkg bringup.launch.py \
 |------|------|---------|----------|
 | `reader` | C++ | cpp_pkg | Serial `/dev/ttyACM0` |
 | `build_waveform` | C++ | cpp_pkg | libsndfile |
-| `yamnet_classification` ×3 | C++ | cpp_pkg | ONNX Runtime |
+| `yamnet_classification` ×3 | C++ | cpp_pkg | ONNX Runtime — classifies the full recording, batched across all YAMNet frames |
 | `writer` | C++ | cpp_pkg | Serial — placeholder for future Pico writers |
 | `web_bridge` | Python | py_pkg | FastAPI, uvicorn, websockets |
-| `llm_node` | Python | py_pkg | anthropic SDK |
+| `llm_node` | Python | py_pkg | anthropic SDK — voices Vigil/Flora/Ludo, see [Agent Personas](#agent-personas) |
 
 ---
 
@@ -234,6 +253,7 @@ rosnetwork/
 │           ├── web_bridge.py
 │           └── llm_node.py
 ├── ai-dj-webapp/                     ← React 19 + Vite kiosk UI
+│   └── public/svgs/                  ← avatar_{vigil,flora,ludo}.svg agent icons
 ├── sketches/
 │   ├── button_reader/                ← Arduino Uno firmware (4×4 keypad)
 │   └── matrix_display/

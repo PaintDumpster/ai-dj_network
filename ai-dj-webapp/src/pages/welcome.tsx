@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { gsap } from 'gsap';
 import type { useWebSocket } from '../hooks/useWebSocket';
 import Countdown from '../components/Countdown';
@@ -29,8 +29,22 @@ export default function Welcome({ ws }: Props) {
     return () => { tween.kill(); };
   }, []);
 
+  const handleStart = useCallback(() => {
+    if (ws.connected && ws.rosState === 'welcome') {
+      ws.postStart();
+    }
+  }, [ws]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.code === 'Enter') handleStart();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleStart]);
+
   return (
-    <div className="welcome-page">
+    <div className="welcome-page" onClick={handleStart} style={{ cursor: 'pointer' }}>
       <div className="welcome-status">
         <div className={`connection-dot${ws.connected ? ' connected' : ''}`} />
         {ws.connected ? 'connected' : 'connecting…'}
@@ -40,7 +54,7 @@ export default function Welcome({ ws }: Props) {
         AI DJ: Audio Bias Pavilion
       </h1>
       <p className="welcome-subtitle" ref={subtitleRef}>
-        press select to start
+        press select or click to start
       </p>
 
       {ws.rosState === 'countdown' && <Countdown />}

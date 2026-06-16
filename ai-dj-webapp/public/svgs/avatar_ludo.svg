@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="440" height="840" viewBox="-110 -115 220 420">
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="22"
+                    flood-color="#1155cc" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <rect x="-110" y="-115" width="220" height="420" fill="#000"/>
+
+  <g id="root" opacity="0">
+    <line x1="0" y1="80" x2="0" y2="258" stroke="#2255bb" stroke-width="5"/>
+    <circle cx="0" cy="0" r="78" fill="#2f6fd4" stroke="white" stroke-width="7"
+            filter="url(#glow)"/>
+
+    <!-- LEFT EYE — starts at open-happy squint (height=10) -->
+    <circle id="lel" cx="-25" cy="-8" r="18" fill="white"/>
+    <rect   id="lul" x="-43" y="-26" width="36" height="10" fill="#2f6fd4"/>
+    <circle id="lpl" cx="-25" cy="-4" r="7"  fill="#2f6fd4"/>
+    <circle id="lsl" cx="-27" cy="-1" r="3"  fill="white" opacity="0"/>
+    <!-- lower lid — drawn AFTER pupil+sparkle so it clips them correctly -->
+    <rect   id="lll" x="-43" y="10"  width="36" height="0" fill="#2f6fd4"/>
+
+    <!-- RIGHT EYE -->
+    <circle id="ler" cx="25"  cy="-8" r="18" fill="white"/>
+    <rect   id="lur" x="7"   y="-26" width="36" height="10" fill="#2f6fd4"/>
+    <circle id="lpr" cx="25"  cy="-4" r="7"  fill="#2f6fd4"/>
+    <circle id="lsr" cx="23"  cy="-1" r="3"  fill="white" opacity="0"/>
+    <rect   id="llr" x="7"   y="10"  width="36" height="0" fill="#2f6fd4"/>
+
+    <text x="0" y="282" text-anchor="middle"
+          font-family="Arial Black, Impact, sans-serif"
+          font-size="12" font-weight="900" letter-spacing="3"
+          fill="#3399ff">CULTURAL</text>
+  </g>
+
+  <script type="text/javascript"><![CDATA[
+  function tween(from, to, ms, ease, onUp, onDone) {
+    const t0 = performance.now();
+    (function tick(now) {
+      const p = Math.min((now - t0) / ms, 1);
+      onUp(from + (to - from) * ease(p));
+      if (p < 1) requestAnimationFrame(tick);
+      else if (onDone) onDone();
+    })(t0);
+  }
+  const E = {
+    spring: t => t===0||t===1 ? t : Math.pow(2,-10*t)*Math.sin((t*10-.75)*(2*Math.PI/3))+1,
+    out:   t => 1-(1-t)**2,
+    out3:  t => 1-(1-t)**3,
+    inOut: t => t<.5 ? 2*t*t : 1-(-2*t+2)**2/2,
+  };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const tw   = (a,b,ms,e,fn) => new Promise(r => tween(a,b,ms,e,fn,r));
+
+  const root = document.getElementById('root');
+  const lul  = document.getElementById('lul');
+  const lur  = document.getElementById('lur');
+  const lll  = document.getElementById('lll');
+  const llr  = document.getElementById('llr');
+  const lsl  = document.getElementById('lsl');
+  const lsr  = document.getElementById('lsr');
+
+  // Lower lid grows upward from y=10 (bottom of eye, r=18, center cy=-8)
+  function lo(el, h) {
+    el.setAttribute('height', h);
+    el.setAttribute('y', 10 - h);
+  }
+  function upper(h) { lul.setAttribute('height', h); lur.setAttribute('height', h); }
+  function lower(h) { lo(lll, h); lo(llr, h); }
+  function spark(v) { lsl.setAttribute('opacity', v); lsr.setAttribute('opacity', v); }
+
+  async function enter() {
+    const t0 = performance.now();
+    await new Promise(r => {
+      (function tick(now) {
+        const p = Math.min((now - t0) / 700, 1);
+        root.setAttribute('opacity', E.out3(p));
+        root.setAttribute('transform', `translate(0,${(E.spring(p)-1)*30})`);
+        if (p < 1) requestAnimationFrame(tick); else r();
+      })(t0);
+    });
+    root.setAttribute('transform', 'translate(0,0)');
+  }
+
+  // Forever: laugh beats → eyes open → sparkle → idle
+  // Loop starts and ends with upper=10, lower=0  (open happy state)
+  async function loop() {
+    while (true) {
+
+      // ── Beat 1: squint tight ──
+      tween(10, 26, 160, E.out, v => upper(v));
+      tween(0,  7,  160, E.out, v => lower(v));
+      await wait(162);
+      tween(26, 15, 115, E.out, v => upper(v));
+      tween(7,  3,  115, E.out, v => lower(v));
+      await wait(117);
+
+      // ── Beat 2 ──
+      tween(15, 26, 148, E.out, v => upper(v));
+      tween(3,  7,  148, E.out, v => lower(v));
+      await wait(150);
+      tween(26, 15, 105, E.out, v => upper(v));
+      tween(7,  3,  105, E.out, v => lower(v));
+      await wait(107);
+
+      // ── Beat 3 (smaller — laugh winding down) ──
+      tween(15, 21, 138, E.out, v => upper(v));
+      await wait(260);
+
+      // Sparkles pop as laugh peaks
+      tween(0, 1, 200, E.out, v => spark(v));
+
+      // Eyes open into warm happy expression
+      await wait(180);
+      tween(21, 10, 520, E.out3, v => upper(v));
+      tween(3,  0,  520, E.out3, v => lower(v));
+
+      // Sparkle pulse
+      await wait(380);
+      tween(1, 0.2, 370, E.inOut, v => spark(v));
+      await wait(372);
+      tween(0.2, 0.9, 370, E.inOut, v => spark(v));
+
+      // Idle — fade sparkles before next cycle
+      await wait(700);
+      tween(0.9, 0, 400, E.out, v => spark(v));
+      await wait(500);
+      // State: upper=10, lower=0, sparkles=0 ✓ ready for next beat
+    }
+  }
+
+  async function main() {
+    await enter();
+    await wait(300);
+    loop();
+  }
+  main();
+  ]]></script>
+</svg>

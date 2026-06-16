@@ -45,7 +45,7 @@ export default function Classification({ ws }: Props) {
     }
   }, [phase]);
 
-  // Navigation (card focus + expand)
+  // Navigation (card focus + expand) — hardware nav events
   useEffect(() => {
     if (!lastNav) return;
     if (phase !== 'results') return;
@@ -66,6 +66,24 @@ export default function Classification({ ws }: Props) {
       });
     }
   }, [lastNav, phase, focusIdx]);
+
+  // Keyboard arrow fallback
+  useEffect(() => {
+    if (phase !== 'results') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'ArrowRight') { setFocusIdx(i => (i + 1) % MODELS.length); setExpandedSet(new Set()); }
+      if (e.code === 'ArrowLeft')  { setFocusIdx(i => (i - 1 + MODELS.length) % MODELS.length); setExpandedSet(new Set()); }
+      if (e.code === 'Enter') {
+        setExpandedSet(prev => {
+          const next = new Set(prev);
+          next.has(focusIdx) ? next.delete(focusIdx) : next.add(focusIdx);
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase, focusIdx]);
 
   return (
     <div className="classification-page">
@@ -93,7 +111,7 @@ export default function Classification({ ws }: Props) {
                 key={model}
                 model={model}
                 results={classification[model]}
-                llmResult={llmResult}
+                llmResult={llmResult[model]}
                 focused={focusIdx === i}
                 expanded={expandedSet.has(i)}
                 animDelay={i * 0.15}

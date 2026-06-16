@@ -14,13 +14,15 @@ export interface LedMatrix {
   data: number[];
 }
 
+export type ModelName = 'surveillance' | 'natural' | 'cultural';
+
 export interface WSState {
   connected: boolean;
   rosState: RosState;
   pressedButtons: Set<string>;
   lastNav: string | null;
-  classification: Record<'surveillance' | 'natural' | 'cultural', string | null>;
-  llmResult: string | null;
+  classification: Record<ModelName, string | null>;
+  llmResult: Record<ModelName, string | null>;
   ledMatrix: LedMatrix | null;
   recordingStartTs: number | null;
 }
@@ -33,7 +35,7 @@ const initialState: WSState = {
   pressedButtons: new Set(),
   lastNav: null,
   classification: { surveillance: null, natural: null, cultural: null },
-  llmResult: null,
+  llmResult:      { surveillance: null, natural: null, cultural: null },
   ledMatrix: null,
   recordingStartTs: null,
 };
@@ -83,7 +85,7 @@ export function useWebSocket() {
           // Reset classification results when starting a new session
           ...(newState === 'countdown' ? {
             classification: { surveillance: null, natural: null, cultural: null },
-            llmResult: null,
+            llmResult:      { surveillance: null, natural: null, cultural: null },
             pressedButtons: new Set<string>(),
           } : {}),
           recordingStartTs: newState === 'recording' ? (msg.timestamp as number) : s.recordingStartTs,
@@ -132,7 +134,13 @@ export function useWebSocket() {
       }
 
       if (type === 'llm_result') {
-        setState(s => ({ ...s, llmResult: msg.data as string }));
+        try {
+          const parsed   = JSON.parse(msg.data as string) as { model: ModelName; sentence: string };
+          const { model: m, sentence } = parsed;
+          if (m && sentence) {
+            setState(s => ({ ...s, llmResult: { ...s.llmResult, [m]: sentence } }));
+          }
+        } catch { /* malformed */ }
         return;
       }
 
@@ -159,6 +167,10 @@ export function useWebSocket() {
     };
   }, [connect]);
 
+  const postStart = useCallback(async () => {
+    await fetch('/api/start', { method: 'POST' });
+  }, []);
+
   const postClassify = useCallback(async () => {
     await fetch('/api/classify', { method: 'POST' });
   }, []);
@@ -167,5 +179,5 @@ export function useWebSocket() {
     await fetch('/api/redo', { method: 'POST' });
   }, []);
 
-  return { ...state, postClassify, postRedo };
+  return { ...state, postStart, postClassify, postRedo };
 }

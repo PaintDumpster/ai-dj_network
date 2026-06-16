@@ -309,32 +309,27 @@ private:
     {
         // Resample to 16kHz if needed
         std::vector<float> resampled = resample_audio(waveform, input_sample_rate_, yamnet_sample_rate_);
-        
-        // YAMNet expects 0.975 seconds (15600 samples at 16kHz)
-        const size_t expected_length = 15600;
-        
-        std::vector<float> processed(expected_length, 0.0f);
-        
-        if (resampled.size() >= expected_length) {
-            // Take the first 15600 samples
-            std::copy(resampled.begin(), resampled.begin() + expected_length, processed.begin());
-        } else {
-            // Pad with zeros if too short
-            std::copy(resampled.begin(), resampled.end(), processed.begin());
+
+        // YAMNet needs at least one analysis window (0.975s @ 16kHz = 15600 samples).
+        // Anything longer is classified in full so events spread across the whole
+        // recording are all seen, instead of only the first ~1 second.
+        const size_t min_length = 15600;
+        if (resampled.size() < min_length) {
+            resampled.resize(min_length, 0.0f);
         }
-        
+
         // Normalize to [-1, 1] range if needed
-        float max_val = *std::max_element(processed.begin(), processed.end());
-        float min_val = *std::min_element(processed.begin(), processed.end());
+        float max_val = *std::max_element(resampled.begin(), resampled.end());
+        float min_val = *std::min_element(resampled.begin(), resampled.end());
         float range = std::max(std::abs(max_val), std::abs(min_val));
-        
+
         if (range > 1.0f) {
-            for (auto& val : processed) {
+            for (auto& val : resampled) {
                 val /= range;
             }
         }
-        
-        return processed;
+
+        return resampled;
     }
     
     void classify_waveform(const std::string& waveform_file)
@@ -398,51 +393,44 @@ private:
             yamnet_output_names.size()
         );
         
-        // Extract embeddings - shape is [num_frames, 1024]
+        // Extract embeddings - shape is [num_frames, 1024], one frame per ~0.48s of audio
         float* embeddings_data = yamnet_outputs[0].GetTensorMutableData<float>();
         auto embeddings_shape = yamnet_outputs[0].GetTensorTypeAndShapeInfo().GetShape();
         size_t num_frames = embeddings_shape[0];
         size_t embedding_size = embeddings_shape[1];
-        
-        RCLCPP_INFO(this->get_logger(), "YamNet embeddings extracted: [%zu frames, %zu dims]", 
+
+        RCLCPP_INFO(this->get_logger(), "YamNet embeddings extracted: [%zu frames, %zu dims]",
                    num_frames, embedding_size);
-        
-        // Average embeddings across all frames to get single 1024-dim vector
-        std::vector<float> avg_embeddings(embedding_size, 0.0f);
-        for (size_t frame = 0; frame < num_frames; frame++) {
-            for (size_t dim = 0; dim < embedding_size; dim++) {
-                avg_embeddings[dim] += embeddings_data[frame * embedding_size + dim];
-            }
-        }
-        for (size_t dim = 0; dim < embedding_size; dim++) {
-            avg_embeddings[dim] /= num_frames;
-        }
-        
-        RCLCPP_INFO(this->get_logger(), "Averaged embeddings across %zu frames", num_frames);
-        
-        // ===== STAGE 2: Run classification head =====
-        // Create input tensor for classification head (expects [1, 1024])
-        std::vector<int64_t> head_input_shape = {1, static_cast<int64_t>(embedding_size)};
-        
+
+        // Remember how long each frame spans in real time, so later timeline buckets
+        // can map frame index back to seconds into the recording.
+        double audio_duration_seconds = static_cast<double>(input_data.size()) / yamnet_sample_rate_;
+        frame_duration_ = num_frames > 0 ? audio_duration_seconds / static_cast<double>(num_frames) : 0.0;
+
+        // ===== STAGE 2: Run classification head on every frame in one batched call =====
+        // The head model has a dynamic batch dimension, so all frames can be classified
+        // together instead of averaging embeddings into a single frame beforehand.
+        std::vector<int64_t> head_input_shape = {static_cast<int64_t>(num_frames), static_cast<int64_t>(embedding_size)};
+
         Ort::Value embedding_tensor = Ort::Value::CreateTensor<float>(
             memory_info,
-            avg_embeddings.data(),
-            avg_embeddings.size(),
+            embeddings_data,
+            num_frames * embedding_size,
             head_input_shape.data(),
             head_input_shape.size()
         );
-        
+
         // Prepare classification head input/output names
         std::vector<const char*> head_input_names;
         std::vector<const char*> head_output_names;
-        
+
         for (const auto& name : input_node_names_) {
             head_input_names.push_back(name.c_str());
         }
         for (const auto& name : output_node_names_) {
             head_output_names.push_back(name.c_str());
         }
-        
+
         // Run classification head
         auto output_tensors = session_->Run(
             Ort::RunOptions{nullptr},
@@ -452,45 +440,56 @@ private:
             head_output_names.data(),
             head_output_names.size()
         );
-        
+
         // Process output (class scores)
         float* output_data = output_tensors[0].GetTensorMutableData<float>();
         auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
-        
+
         size_t num_classes = output_shape[output_shape.size() - 1];
         size_t output_frames = 1;
         if (output_shape.size() > 1) {
             output_frames = output_shape[0];
         }
-        
-        // Store frame-by-frame predictions for time-based analysis
+
+        // Store frame-by-frame predictions for the timeline and LED-matrix time segments
         frame_predictions_.clear();
-        
+
         for (size_t frame = 0; frame < output_frames; frame++) {
             std::vector<std::pair<int, float>> frame_preds;
             size_t offset = frame * num_classes;
-            
+
             for (size_t i = 0; i < num_classes; i++) {
                 frame_preds.push_back({static_cast<int>(i), output_data[offset + i]});
             }
-            
+
             // Sort by score
             std::sort(frame_preds.begin(), frame_preds.end(),
                      [](const auto& a, const auto& b) { return a.second > b.second; });
-            
+
             frame_predictions_.push_back(frame_preds);
         }
-        
-        // Aggregate predictions across all frames
+
+        // Aggregate predictions across all frames (mean score per class over the whole recording)
+        std::vector<float> avg_scores(num_classes, 0.0f);
+        for (size_t frame = 0; frame < output_frames; frame++) {
+            size_t offset = frame * num_classes;
+            for (size_t i = 0; i < num_classes; i++) {
+                avg_scores[i] += output_data[offset + i];
+            }
+        }
+        if (output_frames > 0) {
+            for (auto& s : avg_scores) s /= static_cast<float>(output_frames);
+        }
+
         std::vector<std::pair<int, float>> predictions;
         for (size_t i = 0; i < num_classes; i++) {
-            predictions.push_back({static_cast<int>(i), output_data[i]});
+            predictions.push_back({static_cast<int>(i), avg_scores[i]});
         }
-        
+
         // Sort by score (descending)
         std::sort(predictions.begin(), predictions.end(),
                  [](const auto& a, const auto& b) { return a.second > b.second; });
-        
+
         return predictions;
     }
     
@@ -535,6 +534,11 @@ private:
             }
         }
         
+        // Append a time-bucketed timeline so downstream consumers (the LLM node) can
+        // describe how the soundscape changed across the recording, not just the
+        // single dominant label.
+        result_msg += build_timeline();
+
         // Publish classification results
         auto msg = std_msgs::msg::String();
         msg.data = result_msg;
@@ -558,18 +562,15 @@ private:
     {
         std::vector<std::pair<double, double>> segments;
         
-        if (frame_predictions_.empty()) {
+        if (frame_predictions_.empty() || frame_duration_ <= 0.0) {
             return segments;
         }
-        
-        // YAMNet produces predictions at ~96ms intervals
-        const double frame_duration = 0.096;  // seconds per frame
-        
+
         bool in_segment = false;
         double segment_start = 0.0;
-        
+
         for (size_t frame_idx = 0; frame_idx < frame_predictions_.size(); frame_idx++) {
-            double time = frame_idx * frame_duration;
+            double time = frame_idx * frame_duration_;
             const auto& frame_preds = frame_predictions_[frame_idx];
             
             // Check if this class is in top 3 for this frame
@@ -594,23 +595,74 @@ private:
         
         // Close final segment if still open
         if (in_segment) {
-            segments.push_back({segment_start, frame_predictions_.size() * frame_duration});
+            segments.push_back({segment_start, frame_predictions_.size() * frame_duration_});
         }
         
         return segments;
     }
-    
+
+    // Build a "Timeline:\n0-3s: Label (0.42)\n..." section summarizing the dominant
+    // class in fixed-size buckets across the whole recording. Distinct from the
+    // "N. Label: score" lines above it, so existing parsers of the top-k list are
+    // unaffected by appending this.
+    std::string build_timeline(int bucket_seconds = 3)
+    {
+        if (frame_predictions_.empty() || frame_duration_ <= 0.0 || class_names_.empty()) {
+            return "";
+        }
+
+        size_t num_classes = class_names_.size();
+        double total_duration = frame_predictions_.size() * frame_duration_;
+        int total_seconds = static_cast<int>(std::ceil(total_duration));
+        if (total_seconds <= 0) {
+            return "";
+        }
+
+        std::string timeline = "Timeline:\n";
+
+        for (int bucket_start = 0; bucket_start < total_seconds; bucket_start += bucket_seconds) {
+            int bucket_end = std::min(bucket_start + bucket_seconds, total_seconds);
+
+            std::vector<double> avg(num_classes, 0.0);
+            size_t count = 0;
+            for (size_t f = 0; f < frame_predictions_.size(); f++) {
+                double t = f * frame_duration_;
+                if (t < bucket_start || t >= bucket_end) continue;
+                for (const auto& pred : frame_predictions_[f]) {
+                    if (pred.first >= 0 && static_cast<size_t>(pred.first) < num_classes)
+                        avg[pred.first] += pred.second;
+                }
+                count++;
+            }
+            if (count == 0) continue;
+            for (auto& s : avg) s /= static_cast<double>(count);
+
+            size_t top_class = 0;
+            double top_score = avg[0];
+            for (size_t c = 1; c < num_classes; c++) {
+                if (avg[c] > top_score) {
+                    top_score = avg[c];
+                    top_class = c;
+                }
+            }
+
+            timeline += std::to_string(bucket_start) + "-" + std::to_string(bucket_end) + "s: " +
+                        class_names_[top_class] + " (" + std::to_string(top_score) + ")\n";
+        }
+
+        return timeline;
+    }
+
     void publish_pico_confidence()
     {
         // Aggregate per-frame predictions (~0.096 s each) into 1-second bins,
         // then split between the two Pico boards by time:
         //   Pico 1 — clusters 1-3 → first  3/5 of total seconds (~18 s for 30 s recording)
         //   Pico 2 — clusters 4-5 → last   2/5 of total seconds (~12 s)
-        const double frame_duration = 0.096;
         const size_t num_classes = class_names_.size();
-        if (frame_predictions_.empty() || num_classes == 0) return;
+        if (frame_predictions_.empty() || num_classes == 0 || frame_duration_ <= 0.0) return;
 
-        double total_duration = frame_predictions_.size() * frame_duration;
+        double total_duration = frame_predictions_.size() * frame_duration_;
         int total_seconds     = static_cast<int>(std::ceil(total_duration));
 
         // Boundary: Pico 1 takes the first 3 clusters out of 5
@@ -625,8 +677,8 @@ private:
 
         // Build per-second JSON entries
         auto second_json = [&](int sec) -> std::string {
-            size_t frame_start = static_cast<size_t>(sec / frame_duration);
-            size_t frame_end   = static_cast<size_t>((sec + 1) / frame_duration);
+            size_t frame_start = static_cast<size_t>(sec / frame_duration_);
+            size_t frame_end   = static_cast<size_t>((sec + 1) / frame_duration_);
             frame_end = std::min(frame_end, frame_predictions_.size());
 
             std::vector<double> avg(num_classes, 0.0);
@@ -724,6 +776,8 @@ private:
     
     // Frame-by-frame predictions for time analysis
     std::vector<std::vector<std::pair<int, float>>> frame_predictions_;
+    // Seconds spanned by each entry in frame_predictions_, computed per classification run
+    double frame_duration_ = 0.0;
     
     // ROS objects
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr classification_pub_;

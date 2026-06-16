@@ -257,6 +257,15 @@ async def get_state():
     return {"state": "unknown", "recording_active": False}
 
 
+@app.post("/api/start")
+async def api_start():
+    """Webapp calls this when the user triggers start from the UI (welcome state)."""
+    if bridge_node and bridge_node.state in ("welcome", "ready"):
+        bridge_node.start_countdown()
+        return {"ok": True, "state": bridge_node.state}
+    return JSONResponse(status_code=400, content={"error": f"not in welcome state (current: {bridge_node.state if bridge_node else 'unknown'})"})
+
+
 @app.post("/api/classify")
 async def api_classify():
     """Webapp calls this when user confirms YES at the recording_complete prompt."""

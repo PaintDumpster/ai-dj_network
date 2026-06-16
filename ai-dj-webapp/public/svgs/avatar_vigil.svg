@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="440" height="840" viewBox="-110 -115 220 420">
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="22"
+                    flood-color="#cc0000" flood-opacity="0.85"/>
+    </filter>
+  </defs>
+
+  <rect x="-110" y="-115" width="220" height="420" fill="#000"/>
+
+  <g id="root" opacity="0">
+    <line x1="0" y1="80" x2="0" y2="258" stroke="#aa2222" stroke-width="5"/>
+    <circle cx="0" cy="0" r="78" fill="#cc2222" stroke="white" stroke-width="7"
+            filter="url(#glow)"/>
+
+    <!-- LEFT EYE — heavy-lidded base -->
+    <circle id="vel" cx="-25" cy="-8" r="18" fill="white"/>
+    <rect   id="vul" x="-43" y="-26" width="36" height="12" fill="#cc2222"/>
+    <circle id="vpl" cx="-25" cy="-4" r="7"  fill="#cc2222"/>
+
+    <!-- RIGHT EYE -->
+    <circle id="ver" cx="25"  cy="-8" r="18" fill="white"/>
+    <rect   id="vur" x="7"   y="-26" width="36" height="12" fill="#cc2222"/>
+    <circle id="vpr" cx="25"  cy="-4" r="7"  fill="#cc2222"/>
+
+    <!-- EYEBROWS -->
+    <line id="vbl" x1="-40" y1="-32" x2="-12" y2="-32"
+          stroke="white" stroke-width="5" stroke-linecap="round"/>
+    <line id="vbr" x1="12"  y1="-32" x2="40"  y2="-32"
+          stroke="white" stroke-width="5" stroke-linecap="round" opacity="0"/>
+
+    <text x="0" y="282" text-anchor="middle"
+          font-family="Arial Black, Impact, sans-serif"
+          font-size="12" font-weight="900" letter-spacing="3"
+          fill="#ff4040">SURVEILLANCE</text>
+  </g>
+
+  <script type="text/javascript"><![CDATA[
+  function tween(from, to, ms, ease, onUp, onDone) {
+    const t0 = performance.now();
+    (function tick(now) {
+      const p = Math.min((now - t0) / ms, 1);
+      onUp(from + (to - from) * ease(p));
+      if (p < 1) requestAnimationFrame(tick);
+      else if (onDone) onDone();
+    })(t0);
+  }
+  const E = {
+    spring: t => t===0||t===1 ? t : Math.pow(2,-10*t)*Math.sin((t*10-.75)*(2*Math.PI/3))+1,
+    out:   t => 1-(1-t)**2,
+    out3:  t => 1-(1-t)**3,
+    inOut: t => t<.5 ? 2*t*t : 1-(-2*t+2)**2/2,
+  };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const tw   = (a,b,ms,e,fn) => new Promise(r => tween(a,b,ms,e,fn,r));
+
+  const root = document.getElementById('root');
+  const vul  = document.getElementById('vul');
+  const vpl  = document.getElementById('vpl');
+  const vpr  = document.getElementById('vpr');
+  const vbl  = document.getElementById('vbl');
+  const vbr  = document.getElementById('vbr');
+
+  // Fade-in + spring drop entrance
+  async function enter() {
+    const t0 = performance.now();
+    await new Promise(r => {
+      (function tick(now) {
+        const p = Math.min((now - t0) / 700, 1);
+        root.setAttribute('opacity', E.out3(p));
+        root.setAttribute('transform', `translate(0,${(E.spring(p)-1)*30})`);
+        if (p < 1) requestAnimationFrame(tick); else r();
+      })(t0);
+    });
+    root.setAttribute('transform', 'translate(0,0)');
+  }
+
+  // One-time: raise left brow, fade in right brow, extra squint on left eye
+  async function setup() {
+    tween(0, 0.8, 420, E.out,  v => vbr.setAttribute('opacity', v));
+    tween(-32, -42, 520, E.out3, v => vbl.setAttribute('y1', v));
+    await tw(-32, -36, 520, E.out3, v => vbl.setAttribute('y2', v));
+    await tw(12, 16, 400, E.out3, v => vul.setAttribute('height', v));
+  }
+
+  // Forever: pupils scan left → right → settle; brow pulse
+  async function loop() {
+    while (true) {
+      // Pupils start at cx = -25 / +25 each iteration
+
+      // Dart LEFT
+      await tw(0, -10, 260, E.inOut, v => {
+        vpl.setAttribute('cx', -25 + v);
+        vpr.setAttribute('cx',  25 + v);
+      });
+      await wait(450);
+
+      // Dart RIGHT
+      await tw(-10, 10, 290, E.inOut, v => {
+        vpl.setAttribute('cx', -25 + v);
+        vpr.setAttribute('cx',  25 + v);
+      });
+      await wait(450);
+
+      // Settle slightly left of centre (persistent side-eye)
+      await tw(10, -4, 240, E.out, v => {
+        vpl.setAttribute('cx', -25 + v);
+        vpr.setAttribute('cx',  25 + v);
+      });
+      await wait(600);
+
+      // Impatient brow pulse (raise higher, return)
+      tween(-42, -46, 200, E.inOut, v => vbl.setAttribute('y1', v));
+      tween(-36, -39, 200, E.inOut, v => vbl.setAttribute('y2', v));
+      await wait(210);
+      tween(-46, -42, 200, E.inOut, v => vbl.setAttribute('y1', v));
+      tween(-39, -36, 200, E.inOut, v => vbl.setAttribute('y2', v));
+      await wait(900);
+
+      // Reset pupils to centre during idle (unnoticeable)
+      vpl.setAttribute('cx', '-25');
+      vpr.setAttribute('cx',  '25');
+      await wait(200);
+    }
+  }
+
+  async function main() {
+    await enter();
+    await wait(300);
+    await setup();
+    await wait(400);
+    loop();
+  }
+  main();
+  ]]></script>
+</svg>

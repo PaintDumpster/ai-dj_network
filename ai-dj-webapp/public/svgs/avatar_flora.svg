@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="440" height="840" viewBox="-110 -115 220 420">
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="22"
+                    flood-color="#336611" flood-opacity="0.75"/>
+    </filter>
+  </defs>
+
+  <rect x="-110" y="-115" width="220" height="420" fill="#000"/>
+
+  <g id="root" opacity="0">
+    <line x1="0" y1="80" x2="0" y2="258" stroke="#446622" stroke-width="5"/>
+    <circle cx="0" cy="0" r="78" fill="#5a8830" stroke="white" stroke-width="7"
+            filter="url(#glow)"/>
+
+    <!-- LEFT EYE — open, innocent -->
+    <circle id="fel" cx="-25" cy="-8" r="18" fill="white"/>
+    <rect   id="ful" x="-43" y="-26" width="36" height="4"  fill="#5a8830"/>
+    <circle id="fpl" cx="-25" cy="-4" r="7"  fill="#5a8830"/>
+
+    <!-- RIGHT EYE — winkable -->
+    <circle id="fer" cx="25"  cy="-8" r="18" fill="white"/>
+    <rect   id="fur" x="7"   y="-26" width="36" height="4"  fill="#5a8830"/>
+    <circle id="fpr" cx="25"  cy="-4" r="7"  fill="#5a8830"/>
+    <!-- wink lid grows down from y=-26 to cover full eye (height 36 = 2×r) -->
+    <rect   id="fwink"  x="7"   y="-26" width="36" height="0"  fill="#5a8830"/>
+    <!-- curved wink crease shown while eye is shut -->
+    <path   id="fwline" d="M 8 -8 Q 25 -22 42 -8"
+            stroke="white" fill="none" stroke-width="5"
+            stroke-linecap="round" opacity="0"/>
+
+    <!-- shy eyebrows: inner corners higher = worried/gentle arch -->
+    <line id="fbrobl" x1="-40" y1="-30" x2="-12" y2="-37"
+          stroke="white" stroke-width="4" stroke-linecap="round" opacity="0"/>
+    <line id="fbrobr" x1="12"  y1="-37" x2="40"  y2="-30"
+          stroke="white" stroke-width="4" stroke-linecap="round" opacity="0"/>
+
+    <text x="0" y="282" text-anchor="middle"
+          font-family="Arial Black, Impact, sans-serif"
+          font-size="12" font-weight="900" letter-spacing="3"
+          fill="#77cc33">NATURAL</text>
+  </g>
+
+  <script type="text/javascript"><![CDATA[
+  function tween(from, to, ms, ease, onUp, onDone) {
+    const t0 = performance.now();
+    (function tick(now) {
+      const p = Math.min((now - t0) / ms, 1);
+      onUp(from + (to - from) * ease(p));
+      if (p < 1) requestAnimationFrame(tick);
+      else if (onDone) onDone();
+    })(t0);
+  }
+  const E = {
+    spring: t => t===0||t===1 ? t : Math.pow(2,-10*t)*Math.sin((t*10-.75)*(2*Math.PI/3))+1,
+    out:   t => 1-(1-t)**2,
+    out3:  t => 1-(1-t)**3,
+    inOut: t => t<.5 ? 2*t*t : 1-(-2*t+2)**2/2,
+  };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const tw   = (a,b,ms,e,fn) => new Promise(r => tween(a,b,ms,e,fn,r));
+
+  const root   = document.getElementById('root');
+  const fpl    = document.getElementById('fpl');
+  const fpr    = document.getElementById('fpr');
+  const fer    = document.getElementById('fer');
+  const fwink  = document.getElementById('fwink');
+  const fwline = document.getElementById('fwline');
+  const fbrobl = document.getElementById('fbrobl');
+  const fbrobr = document.getElementById('fbrobr');
+
+  // Move both pupils by offset from their base (cx: ±25, cy: -4)
+  function pupils(dx, dy) {
+    fpl.setAttribute('cx', -25 + dx);
+    fpl.setAttribute('cy',  -4 + dy);
+    fpr.setAttribute('cx',  25 + dx);
+    fpr.setAttribute('cy',  -4 + dy);
+  }
+
+  async function enter() {
+    const t0 = performance.now();
+    await new Promise(r => {
+      (function tick(now) {
+        const p = Math.min((now - t0) / 700, 1);
+        root.setAttribute('opacity', E.out3(p));
+        root.setAttribute('transform', `translate(0,${(E.spring(p)-1)*30})`);
+        if (p < 1) requestAnimationFrame(tick); else r();
+      })(t0);
+    });
+    root.setAttribute('transform', 'translate(0,0)');
+  }
+
+  // One-time: shy eyebrows fade in
+  async function setup() {
+    await tw(0, 0.7, 720, E.out3, v => {
+      fbrobl.setAttribute('opacity', v);
+      fbrobr.setAttribute('opacity', v);
+    });
+  }
+
+  // Forever: look-down → wink → drift → second wink → reset
+  // Loop starts and ends with pupils at base (dx=0, dy=0)
+  async function loop() {
+    while (true) {
+
+      // Pupils look DOWN (shy glance; max cy = -8+11=3, so dy max = 7)
+      await tw(0, 7, 420, E.out3, v => pupils(0, v));
+      await wait(680);
+
+      // Pupils look back UP
+      await tw(7, 0, 320, E.out, v => pupils(0, v));
+      await wait(200);
+
+      // RIGHT EYE WINKS — lid sweeps down (height 0 → 36 = full eye)
+      await tw(0, 36, 210, E.inOut, v => fwink.setAttribute('height', v));
+      fer.setAttribute('opacity', '0');
+      fpr.setAttribute('opacity', '0');
+      fwline.setAttribute('opacity', '1');
+      await wait(480);
+      fer.setAttribute('opacity', '1');
+      fpr.setAttribute('opacity', '1');
+      fwline.setAttribute('opacity', '0');
+      await tw(36, 0, 200, E.out, v => fwink.setAttribute('height', v));
+
+      // Pupils drift LEFT + slightly down (shy avoidance)
+      await wait(160);
+      await tw(0, 1, 390, E.out, t => pupils(-5*t, 4*t));
+      // pupils now at dx=-5, dy=4
+
+      await wait(860);
+
+      // Second quick wink (right eye, pupils still drifted)
+      await tw(0, 36, 185, E.inOut, v => fwink.setAttribute('height', v));
+      fer.setAttribute('opacity', '0');
+      fpr.setAttribute('opacity', '0');
+      fwline.setAttribute('opacity', '1');
+      await wait(310);
+      fer.setAttribute('opacity', '1');
+      fpr.setAttribute('opacity', '1');
+      fwline.setAttribute('opacity', '0');
+      await tw(36, 0, 185, E.out, v => fwink.setAttribute('height', v));
+
+      // Animate pupils back to centre
+      await wait(180);
+      await tw(0, 1, 320, E.out, t => pupils(-5*(1-t), 4*(1-t)));
+      // pupils now at dx=0, dy=0 ✓
+
+      // Idle before next cycle
+      await wait(800);
+    }
+  }
+
+  async function main() {
+    await enter();
+    await wait(300);
+    setup(); // fire-and-forget — brows appear while loop starts
+    await wait(200);
+    loop();
+  }
+  main();
+  ]]></script>
+</svg>

@@ -74,13 +74,18 @@ export function useRhythmEngine() {
 
     const url    = getRandomSound(buttonKey);
     const player = new Tone.Player(url).toDestination();
+    activePlayers.current.set(buttonKey, player); // register before await so onRelease can stop it
     try {
       await player.load(url);
+      if (!activePlayers.current.has(buttonKey)) {
+        player.dispose(); // was released during load
+        return;
+      }
       player.start();
-      activePlayers.current.set(buttonKey, player);
       spawnWaveform(url, buttonIndex);
     } catch (e) {
       console.error('Tone.Player error:', e);
+      activePlayers.current.delete(buttonKey);
       player.dispose();
     }
   };
