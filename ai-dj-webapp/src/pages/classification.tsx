@@ -132,6 +132,7 @@ export default function Classification({ ws, locked }: Props) {
           <div className="nav-hint-bar">
             <span className="nav-hint"><span className="nav-key">B</span><span className="nav-key">C</span> Navigate cards</span>
             <span className="nav-hint"><span className="nav-key">*</span> Expand / collapse</span>
+            <span className="nav-hint"><span className="nav-key">#</span> Restart</span>
           </div>
         </>
       )}
