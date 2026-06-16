@@ -12,6 +12,13 @@ import threading
 import json
 import os
 
+# Same convention as bringup.launch.py: AI_DJ_WORKSPACE is set to /ros2_ws
+# inside Docker, and defaults to the local dev workspace otherwise.
+WORKSPACE = os.environ.get(
+    'AI_DJ_WORKSPACE',
+    os.path.expanduser('~/iaac/ai4all/rosnetwork'),
+)
+
 app = FastAPI(title="ROS2 Web Bridge")
 
 app.add_middleware(
@@ -315,12 +322,8 @@ async def get_classifications():
 @app.get("/api/sounds")
 async def get_sound_files():
     sounds_mapping = {}
-    sounds_paths = [
-        os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
-        "/home/salva/iaac/ai4all/rosnetwork/sounds",
-    ]
-    sounds_base = next((p for p in sounds_paths if os.path.exists(p)), None)
-    if sounds_base:
+    sounds_base = os.path.join(WORKSPACE, "sounds")
+    if os.path.exists(sounds_base):
         for button_num in range(1, 11):
             button_dirs = [
                 d for d in os.listdir(sounds_base)
@@ -357,25 +360,18 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── Static files ──────────────────────────────────────────────────────
 
-sounds_paths = [
-    os.path.expanduser("~/iaac/ai4all/rosnetwork/sounds"),
-    "/home/salva/iaac/ai4all/rosnetwork/sounds",
-]
-for sp in sounds_paths:
-    if os.path.exists(sp):
-        app.mount("/sounds", StaticFiles(directory=sp), name="sounds")
-        print(f"Serving sounds from: {sp}")
-        break
+sounds_path = os.path.join(WORKSPACE, "sounds")
+if os.path.exists(sounds_path):
+    app.mount("/sounds", StaticFiles(directory=sounds_path), name="sounds")
+    print(f"Serving sounds from: {sounds_path}")
 else:
-    print("Warning: sounds directory not found!")
+    print(f"Warning: sounds directory not found at {sounds_path}!")
 
 # Serve built React app (production). During dev, Vite dev server proxies to :8000.
 webapp_paths = [
-    os.path.expanduser("~/iaac/ai4all/rosnetwork/ai-dj-webapp/dist"),
-    "/home/salva/iaac/ai4all/rosnetwork/ai-dj-webapp/dist",
+    os.path.join(WORKSPACE, "ai-dj-webapp", "dist"),
     # Legacy fallback
-    os.path.expanduser("~/iaac/ai4all/rosnetwork/webapp"),
-    "/home/salva/iaac/ai4all/rosnetwork/webapp",
+    os.path.join(WORKSPACE, "webapp"),
 ]
 for wp in webapp_paths:
     if os.path.exists(wp):
@@ -383,7 +379,7 @@ for wp in webapp_paths:
         print(f"Serving webapp from: {wp}")
         break
 else:
-    print("Warning: webapp directory not found!")
+    print(f"Warning: webapp directory not found! Checked: {webapp_paths}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────
