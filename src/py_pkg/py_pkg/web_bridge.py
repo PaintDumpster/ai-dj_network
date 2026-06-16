@@ -171,6 +171,17 @@ class WebBridgeNode(Node):
         self._call_service(self.stop_recording_client, "stop_recording")
         self.start_countdown()
 
+    def reset_to_welcome(self):
+        """Full restart — cancel any in-progress timers/recording and return all
+        the way to welcome. Triggered by the # (BACK) keypad button, from any state."""
+        self._cancel_timer('countdown_timer')
+        self._cancel_timer('recording_timer')
+        self._call_service(self.stop_recording_client, "stop_recording")
+        self.received_model_count = 0
+        self.classification_results = {"surveillance": None, "natural": None, "cultural": None}
+        self.state = "welcome"
+        self.broadcast_state()
+
     # ── Subscription callbacks ────────────────────────────────────────
 
     def state_control_callback(self, msg):
@@ -289,6 +300,16 @@ async def api_redo():
         bridge_node.redo_recording()
         return {"ok": True, "state": bridge_node.state}
     return JSONResponse(status_code=400, content={"error": "not in recording_complete state"})
+
+
+@app.post("/api/restart")
+async def api_restart():
+    """Webapp calls this when the user confirms Yes on the restart-experience
+    prompt (triggered by the # / BACK keypad button). Works from any state."""
+    if bridge_node:
+        bridge_node.reset_to_welcome()
+        return {"ok": True, "state": bridge_node.state}
+    return JSONResponse(status_code=503, content={"error": "node not ready"})
 
 
 @app.post("/api/colorize")

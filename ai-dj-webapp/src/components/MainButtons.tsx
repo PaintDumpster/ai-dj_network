@@ -12,7 +12,7 @@ function MainButtons({
     return (
         <div className="buttons">
             <button onClick={onPrevious} className="nav-button">‹</button>
-            <button onClick={onContinue} className="nav-button">SELECT</button>
+            <button onClick={onContinue} className="nav-button">*</button>
             <button onClick={onNext} className="nav-button">›</button>
         </div>
     )

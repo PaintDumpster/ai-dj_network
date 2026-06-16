@@ -3,9 +3,9 @@ import { gsap } from 'gsap';
 import type { useWebSocket } from '../hooks/useWebSocket';
 import Countdown from '../components/Countdown';
 
-interface Props { ws: ReturnType<typeof useWebSocket>; }
+interface Props { ws: ReturnType<typeof useWebSocket>; locked?: boolean; }
 
-export default function Welcome({ ws }: Props) {
+export default function Welcome({ ws, locked }: Props) {
   const titleRef    = useRef<HTMLHeadingElement>(null);
   const subtitleRef = useRef<HTMLParagraphElement>(null);
 
@@ -30,18 +30,20 @@ export default function Welcome({ ws }: Props) {
   }, []);
 
   const handleStart = useCallback(() => {
+    if (locked) return;
     if (ws.connected && ws.rosState === 'welcome') {
       ws.postStart();
     }
-  }, [ws]);
+  }, [ws, locked]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (locked) return;
       if (e.code === 'Space' || e.code === 'Enter') handleStart();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleStart]);
+  }, [handleStart, locked]);
 
   return (
     <div className="welcome-page" onClick={handleStart} style={{ cursor: 'pointer' }}>
@@ -54,7 +56,7 @@ export default function Welcome({ ws }: Props) {
         AI DJ: Audio Bias Pavilion
       </h1>
       <p className="welcome-subtitle" ref={subtitleRef}>
-        press select or click to start
+        press * or click to start
       </p>
 
       {ws.rosState === 'countdown' && <Countdown />}

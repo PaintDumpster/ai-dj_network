@@ -3,18 +3,18 @@ import { gsap } from 'gsap';
 import type { useWebSocket } from '../hooks/useWebSocket';
 import ClassificationCard, { type ModelName } from '../components/ClassificationCard';
 
-interface Props { ws: ReturnType<typeof useWebSocket>; }
+interface Props { ws: ReturnType<typeof useWebSocket>; locked?: boolean; }
 
 const MODELS: ModelName[] = ['surveillance', 'natural', 'cultural'];
 
-export default function Classification({ ws }: Props) {
+export default function Classification({ ws, locked }: Props) {
   const [phase, setPhase]       = useState<'classifying' | 'generating' | 'results'>('classifying');
   const [focusIdx, setFocusIdx]       = useState(0);
   const [expandedSet, setExpandedSet] = useState<Set<number>>(new Set());
   const labelRef  = useRef<HTMLParagraphElement>(null);
   const label2Ref = useRef<HTMLParagraphElement>(null);
 
-  const { rosState, classification, llmResult, lastNav } = ws;
+  const { rosState, classification, llmResult, lastNav, postColorize } = ws;
   const anyResult = Object.values(classification).some(r => r !== null);
   const allResults = MODELS.every(m => classification[m] !== null);
 
@@ -71,6 +71,7 @@ export default function Classification({ ws }: Props) {
   useEffect(() => {
     if (phase !== 'results') return;
     const onKey = (e: KeyboardEvent) => {
+      if (locked) return;
       if (e.code === 'ArrowRight') { setFocusIdx(i => (i + 1) % MODELS.length); setExpandedSet(new Set()); }
       if (e.code === 'ArrowLeft')  { setFocusIdx(i => (i - 1 + MODELS.length) % MODELS.length); setExpandedSet(new Set()); }
       if (e.code === 'Enter') {
@@ -83,7 +84,16 @@ export default function Classification({ ws }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, focusIdx]);
+  }, [phase, focusIdx, locked]);
+
+  // Colorize the physical LED waveform to match whichever card is expanded;
+  // revert to white when collapsed, switching cards, or leaving this page.
+  useEffect(() => {
+    if (phase !== 'results') return;
+    const model = expandedSet.has(focusIdx) ? MODELS[focusIdx] : '';
+    postColorize(model);
+    return () => { postColorize(''); };
+  }, [expandedSet, focusIdx, phase, postColorize]);
 
   return (
     <div className="classification-page">
@@ -121,7 +131,7 @@ export default function Classification({ ws }: Props) {
 
           <div className="nav-hint-bar">
             <span className="nav-hint"><span className="nav-key">B</span><span className="nav-key">C</span> Navigate cards</span>
-            <span className="nav-hint"><span className="nav-key">SELECT</span> Expand / collapse</span>
+            <span className="nav-hint"><span className="nav-key">*</span> Expand / collapse</span>
           </div>
         </>
       )}

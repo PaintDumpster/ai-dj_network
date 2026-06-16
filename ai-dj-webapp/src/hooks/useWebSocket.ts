@@ -179,5 +179,17 @@ export function useWebSocket() {
     await fetch('/api/redo', { method: 'POST' });
   }, []);
 
-  return { ...state, postStart, postClassify, postRedo };
+  const postRestart = useCallback(async () => {
+    await fetch('/api/restart', { method: 'POST' });
+  }, []);
+
+  const postColorize = useCallback(async (model: string) => {
+    await fetch('/api/colorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+  }, []);
+
+  return { ...state, postStart, postClassify, postRedo, postRestart, postColorize };
 }

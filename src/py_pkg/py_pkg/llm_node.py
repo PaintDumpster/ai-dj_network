@@ -8,17 +8,22 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 # Shared rule: these are raw multi-label detector scores over ~9-10 classes, so chance
-# alone puts unrelated labels around 0.10-0.15. Without an explicit scale the models were
-# narrating noise-level scores (0.11-0.14) as confirmed events ("active combat zone").
-_CONFIDENCE_SCALE = (
-    "Calibrate your tone to the confidence numbers, which range 0-1: above 0.5 is a clear "
-    "detection, so describe it directly; between 0.25 and 0.5 is a faint, partial match, so "
-    "hedge with 'I think I hear...' or 'it might be...'; below 0.25 is close to background "
-    "noise, so say so explicitly ({low_confidence_phrase}) instead of describing a specific "
-    "event. Never state a specific second count or timestamp (e.g. 'at the 21-second mark') "
-    "— the actual clip length varies and listeners don't experience it as a stopwatch. "
-    "Describe progression only in relative terms, like 'at first', 'partway through', or "
-    "'toward the end'."
+# alone puts unrelated labels around 0.10-0.15 — the numbers are relative rankings among
+# a fixed candidate set, not calibrated probabilities, and aren't meaningful in isolation.
+# Earlier versions either narrated noise-level scores as confirmed dramatic events
+# ("active combat zone") or, when given an explicit magnitude scale, swung the other way
+# and described everything as quiet/uncertain. This rule picks neither: always narrate the
+# top-ranked sound(s) as something actually heard, using rank order alone.
+_RANKING_RULE = (
+    "Treat the list purely as a ranking, most to least likely — ignore the numeric scores "
+    "entirely, they are not meaningful on their own. Always describe the top-ranked sound(s) "
+    "directly and in character, as something you confidently hear right now: never hedge "
+    "('I think', 'might be'), and never say the scene is quiet, silent, or that nothing "
+    "stands out. Build the narrative from the order of the list — lead with the top result, "
+    "and use the 2nd and 3rd only as supporting background texture. Never state a specific "
+    "second count or timestamp (e.g. 'at the 21-second mark') — the actual clip length "
+    "varies and listeners don't experience it as a stopwatch. Describe progression only in "
+    "relative terms, like 'at first', 'partway through', or 'toward the end'."
 )
 
 AGENT_PROMPTS = {
@@ -30,7 +35,7 @@ AGENT_PROMPTS = {
         "warning or piece of safety advice, e.g. 'Watch out! I hear bullets coming your way "
         "— take cover now.' Use the timeline to describe how the danger develops over time "
         "(e.g. building up, fading, or suddenly changing) rather than only a single snapshot. "
-        + _CONFIDENCE_SCALE.format(low_confidence_phrase="you're not picking up anything alarming") +
+        + _RANKING_RULE +
         " Never mention YAMNet, model names, confidence scores, or other technical terms."
     ),
     'natural': (
@@ -41,7 +46,7 @@ AGENT_PROMPTS = {
         "suggestion, e.g. 'I can hear birds calling through the wind. Take a moment to "
         "breathe it in.' Use the timeline to describe how the scene shifts over time rather "
         "than only a single snapshot. "
-        + _CONFIDENCE_SCALE.format(low_confidence_phrase="it's quiet and nothing stands out") +
+        + _RANKING_RULE +
         " Never mention YAMNet, model names, confidence scores, or other technical terms."
     ),
     'cultural': (
@@ -52,7 +57,7 @@ AGENT_PROMPTS = {
         "to join in, e.g. 'I hear drums and laughter — sounds like a street party! Go see "
         "what's happening.' Use the timeline to describe how the scene builds or shifts over "
         "time rather than only a single snapshot. "
-        + _CONFIDENCE_SCALE.format(low_confidence_phrase="things sound pretty quiet right now") +
+        + _RANKING_RULE +
         " Never mention YAMNet, model names, confidence scores, or other technical terms."
     ),
 }
@@ -119,7 +124,7 @@ def _phases_from_timeline(timeline):
             best[phase] = {'label': t['label'], 'score': t['score']}
 
     return '; '.join(
-        f"{phase}: {best[phase]['label']} ({best[phase]['score']:.2f})"
+        f"{phase}: {best[phase]['label']}"
         for phase in _PHASE_ORDER if phase in best
     )
 
@@ -190,7 +195,7 @@ class LLMNode(Node):
             return FALLBACK_MESSAGE
 
         system_prompt = AGENT_PROMPTS.get(model_name, AGENT_PROMPTS['surveillance'])
-        sounds = ', '.join(f"{r['label']} ({r['score']:.2f})" for r in top3)
+        sounds = ', '.join(r['label'] for r in top3)
         content = f'Detected sounds, most to least likely: {sounds}.'
 
         # Collapse the absolute-second timeline into relative phases before it ever

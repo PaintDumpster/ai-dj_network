@@ -3,10 +3,10 @@ import { gsap } from 'gsap';
 import type { useWebSocket } from '../hooks/useWebSocket';
 import { useRhythmEngine } from '../hooks/useRhythmEngine';
 import LedMatrix from '../components/LedMatrix';
-import GamePrompt from '../components/GamePrompt';
+import ConfirmPrompt from '../components/ConfirmPrompt';
 import type { SoundButton } from '../state/soundConfig';
 
-interface Props { ws: ReturnType<typeof useWebSocket>; }
+interface Props { ws: ReturnType<typeof useWebSocket>; locked?: boolean; }
 
 const BUTTON_KEYS: SoundButton[] = ['b1','b2','b3','b4','b5','b6','b7','b8','b9','b10'];
 const BUTTON_LABELS = ['1','2','3','4','5','6','7','8','9','0'];
@@ -17,7 +17,7 @@ function formatTime(sec: number) {
   return `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 }
 
-export default function Game({ ws }: Props) {
+export default function Game({ ws, locked }: Props) {
   const { trackRef, onPress, onRelease, stopAll } = useRhythmEngine();
   const [elapsed, setElapsed]   = useState(0);
   const timerBarRef             = useRef<HTMLDivElement>(null);
@@ -121,11 +121,13 @@ export default function Game({ ws }: Props) {
       </div>
 
       {/* Accept / redo overlay after recording ends */}
-      {ws.rosState === 'recording_complete' && (
-        <GamePrompt
+      {ws.rosState === 'recording_complete' && !locked && (
+        <ConfirmPrompt
+          question="Submit your audio mix?"
           lastNav={ws.lastNav}
-          onClassify={ws.postClassify}
-          onRedo={ws.postRedo}
+          onYes={ws.postClassify}
+          onNo={ws.postRedo}
+          locked={locked}
         />
       )}
     </div>

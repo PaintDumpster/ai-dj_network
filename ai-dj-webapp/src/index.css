@@ -210,8 +210,8 @@ body {
   box-shadow: 0 0 16px rgba(0,212,255,0.35);
 }
 
-/* ── Game prompt overlay ──────────────────────────────────── */
-.game-prompt-overlay {
+/* ── Confirm prompt overlay ───────────────────────────────── */
+.confirm-prompt-overlay {
   position: fixed;
   inset: 0;
   display: flex;
@@ -223,7 +223,7 @@ body {
   z-index: 50;
 }
 
-.game-prompt-box {
+.confirm-prompt-box {
   background: rgba(15,17,25,0.95);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -236,20 +236,20 @@ body {
   opacity: 0;
 }
 
-.game-prompt-question {
+.confirm-prompt-question {
   font-size: 1.1rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text);
 }
 
-.game-prompt-hint {
+.confirm-prompt-hint {
   font-size: 11px;
   color: var(--muted);
   letter-spacing: 0.15em;
 }
 
-.game-prompt-choices {
+.confirm-prompt-choices {
   display: flex;
   gap: 32px;
 }

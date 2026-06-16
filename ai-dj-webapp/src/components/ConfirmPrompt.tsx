@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 
 interface Props {
+  question: string;
+  yesLabel?: string;
+  noLabel?: string;
   lastNav: string | null;
-  onClassify: () => void;
-  onRedo: () => void;
+  onYes: () => void;
+  onNo: () => void;
+  locked?: boolean;
 }
 
-export default function GamePrompt({ lastNav, onClassify, onRedo }: Props) {
+export default function ConfirmPrompt({ question, yesLabel = 'Yes', noLabel = 'No', lastNav, onYes, onNo, locked }: Props) {
   const [selected, setSelected] = useState<'yes' | 'no'>('yes');
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -22,46 +26,47 @@ export default function GamePrompt({ lastNav, onClassify, onRedo }: Props) {
     if (lastNav === 'NAV_C') setSelected('yes');
     if (lastNav === 'NAV_B') setSelected('no');
     if (lastNav === 'SELECT') {
-      selected === 'yes' ? onClassify() : onRedo();
+      selected === 'yes' ? onYes() : onNo();
     }
-  }, [lastNav, selected, onClassify, onRedo]);
+  }, [lastNav, selected, onYes, onNo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (locked) return;
       if (e.code === 'ArrowRight') setSelected('yes');
       if (e.code === 'ArrowLeft')  setSelected('no');
       if (e.code === 'Enter') {
-        setSelected(s => { s === 'yes' ? onClassify() : onRedo(); return s; });
+        setSelected(s => { s === 'yes' ? onYes() : onNo(); return s; });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClassify, onRedo]);
+  }, [locked, onYes, onNo]);
 
   return (
-    <div className="game-prompt-overlay">
-      <div className="game-prompt-box" ref={boxRef}>
-        <p className="game-prompt-question">Submit your audio mix?</p>
+    <div className="confirm-prompt-overlay">
+      <div className="confirm-prompt-box" ref={boxRef}>
+        <p className="confirm-prompt-question">{question}</p>
 
-        <div className="game-prompt-choices">
+        <div className="confirm-prompt-choices">
           <button
             className={`prompt-choice${selected === 'no' ? ' selected-no' : ''}`}
-            onClick={onRedo}
+            onClick={onNo}
           >
-            ← No
+            ← {noLabel}
           </button>
           <button
             className={`prompt-choice${selected === 'yes' ? ' selected-yes' : ''}`}
-            onClick={onClassify}
+            onClick={onYes}
           >
-            Yes →
+            {yesLabel} →
           </button>
         </div>
 
-        <p className="game-prompt-hint">
-          <span className="nav-key">B</span> No &nbsp;·&nbsp;
-          <span className="nav-key">C</span> Yes &nbsp;·&nbsp;
-          <span className="nav-key">SELECT</span> Confirm
+        <p className="confirm-prompt-hint">
+          <span className="nav-key">B</span> {noLabel} &nbsp;·&nbsp;
+          <span className="nav-key">C</span> {yesLabel} &nbsp;·&nbsp;
+          <span className="nav-key">*</span> Confirm
         </p>
       </div>
     </div>
