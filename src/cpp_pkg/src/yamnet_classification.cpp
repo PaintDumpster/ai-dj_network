@@ -21,7 +21,7 @@ public:
         this->declare_parameter("class_names_path", std::string(std::getenv("HOME")) + "/rosnetwork/models/yamnet_class_names.txt");
         this->declare_parameter("model_name", "yamnet_default");
         this->declare_parameter("output_topic", "classification_results");
-        this->declare_parameter("input_sample_rate", 44100);
+        this->declare_parameter("input_sample_rate", 16000);
         this->declare_parameter("yamnet_sample_rate", 16000);
         this->declare_parameter("waveform_file_check_interval", 1.0);
         this->declare_parameter("model_color_r", 255);  // Red channel for this model
